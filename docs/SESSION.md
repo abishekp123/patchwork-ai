@@ -37,8 +37,15 @@ success is claimed. The HTTP/proxy checks and automated component tests passed.
 Local npm reported an optional `fsevents` install-script notice; install, tests,
 build, and server startup succeeded without enabling it.
 
-CI is configured for Python 3.12/3.14 and Node 24. Remote execution and final
-push verification will be recorded after the initial push.
+GitHub Actions [run 43890617683](https://github.com/abishekp123/patchwork-ai/actions/runs/43890617683)
+passed on Linux for Python 3.12, Python 3.14, and Node 24. The verified code is
+in commits `a2d56ac` (backend), `b0133f3` (frontend), and `4e69efe` (CI/docs).
+The private remote's default branch is `master`; its head matched the local
+implementation commit after push. This handoff update changes documentation only.
+
+The development and preview servers used for verification were stopped cleanly.
+Use the README commands to restart them. No known implementation failures remain;
+the browser verification limitation above is still open.
 
 ## Next tasks
 
