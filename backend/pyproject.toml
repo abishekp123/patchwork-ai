@@ -12,6 +12,8 @@ dependencies = [
     "pydantic>=2.10,<3",
     "uvicorn>=0.34,<1",
     "python-dotenv>=1,<2",
+    "tree-sitter>=0.26,<0.27",
+    "tree-sitter-python>=0.25,<0.26",
 ]
 
 [project.optional-dependencies]
