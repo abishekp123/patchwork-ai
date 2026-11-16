@@ -3,14 +3,19 @@
 A platform for AI-assisted code investigation and verified repair.
 **Milestones 1–4 are implemented:** a FastAPI API, SQLite indexes, a React
 health dashboard, deterministic repository ingestion and code intelligence,
-a bounded investigation orchestration loop, and a reviewable patch workflow.
+a bounded investigation orchestration loop, a reviewable patch workflow, and a
+hardening pass covering evidence validation, path safety, and review-state
+conflict prevention.
 Import public GitHub repositories at pinned commits, inspect Tree-sitter symbols
 and imports, search source without an LLM key, run investigation sessions that
 validate source evidence before a reviewed report is accepted, and create
 reviewable patch proposals that persist until a human approves or rejects them.
 Repository operations are API-only; the frontend exposes the health and review
-interfaces while the backend owns repository indexing, investigations, and patch
-approval state.
+interfaces while the backend owns repository indexing, investigations, patch
+validation, and approval state. Current patch validation rejects fabricated and
+stale evidence, traversal or symlink-like paths, duplicate edits, no-op changes,
+syntax-invalid updates, and repeated approval/rejection attempts after a patch is
+reviewed.
 
 ## Requirements
 

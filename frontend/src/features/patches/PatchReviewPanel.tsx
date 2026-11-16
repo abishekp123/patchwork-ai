@@ -23,7 +23,35 @@ export function PatchReviewPanel() {
   }
 
   useEffect(() => {
-    void refresh()
+    let active = true
+
+    const load = async () => {
+      try {
+        const next = await listPatches()
+        if (!active) {
+          return
+        }
+        setPatches(next)
+        setError(null)
+      } catch (issue) {
+        if (!active) {
+          return
+        }
+        setError(
+          issue instanceof Error ? issue.message : 'Unable to load patches.',
+        )
+      } finally {
+        if (active) {
+          setLoading(false)
+        }
+      }
+    }
+
+    void load()
+
+    return () => {
+      active = false
+    }
   }, [])
 
   const review = async (id: string, decision: 'approve' | 'reject') => {

@@ -1,6 +1,6 @@
 # Session handoff
 
-Date: 2026-11-16 (America/Toronto). Implemented scope: Milestone 4 repair synthesis and human review workflow.
+Date: 2026-11-16 (America/Toronto). Implemented scope: Milestone 4.1 hardening and verification for reviewable patch generation.
 
 ## Current state
 
@@ -25,10 +25,23 @@ Date: 2026-11-16 (America/Toronto). Implemented scope: Milestone 4 repair synthe
   usage metadata when available. Automated tests exercise mocked provider
   responses instead of requiring a live API key.
 - The backend exposes investigation APIs for create, fetch, steps, and cancel,
-  plus patch generation and approval/rejection endpoints.
+  plus patch generation, review, and approval/rejection endpoints.
 - Patch proposals are generated from indexed snapshots, validated against the
-  repository state, stored as unified diffs, and persisted through human approval
-  and rejection transitions in SQLite.
+  repository state, and guarded against fabricated evidence, cross-commit or
+  cross-repository references, duplicate or overlapping edits, traversal paths,
+  no-op or syntax-invalid changes, and repeated review-state transitions. Patch
+  review now refuses second approvals or rejections after a patch is resolved.
+- Frontend review panels cover loading, empty, approval, rejection, and API-error
+  states using deterministic mocked fetch responses.
+
+## Known limitations
+
+- Patch generation remains a review-only workflow: it never executes repository
+  changes or writes to the working tree; it stores a unified diff record for human
+  approval.
+- Patch validation relies on the indexed snapshot and explicit evidence hashes
+  derived from repository metadata. It does not interpret or execute untrusted
+  model output beyond deterministic validation and syntax checks.
 
 ## Verification executed
 

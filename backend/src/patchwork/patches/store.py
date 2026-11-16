@@ -88,12 +88,34 @@ class PatchStore:
         allowed = {"pending_review", "approved", "rejected", "failed", "invalid", "draft"}
         if status not in allowed:
             raise ValueError("Unsupported patch status.")
+        current = self.get(identifier)
+        if current.status == status:
+            raise PatchworkError(
+                "patch_review_conflict",
+                "Patch review is already in the requested state.",
+                409,
+            )
+        if current.status not in {"pending_review", "draft"}:
+            raise PatchworkError(
+                "patch_review_conflict",
+                "Patch review is already resolved and cannot be changed.",
+                409,
+            )
+        if status not in {"approved", "rejected", "failed", "invalid"}:
+            if status == "pending_review" and current.status == "draft":
+                pass
+            else:
+                raise PatchworkError(
+                    "patch_review_conflict",
+                    "Only approval or rejection transitions are allowed for a reviewable patch.",
+                    409,
+                )
         now = timestamp()
         with connect_database(self.database_path) as connection, connection:
-            connection.execute(
+            cursor = connection.execute(
                 """
                 UPDATE patches SET status = ?, updated_at = ?, reviewed_at = ?, reviewer = ?,
-                decision_reason = ?, error_code = ? WHERE id = ?
+                decision_reason = ?, error_code = ? WHERE id = ? AND status = ?
                 """,
                 (
                     status,
@@ -103,8 +125,15 @@ class PatchStore:
                     reason,
                     error_code,
                     identifier,
+                    current.status,
                 ),
             )
+            if cursor.rowcount != 1:
+                raise PatchworkError(
+                    "patch_review_conflict",
+                    "Patch review state changed concurrently; retry the decision.",
+                    409,
+                )
         return self.get(identifier)
 
     @staticmethod
