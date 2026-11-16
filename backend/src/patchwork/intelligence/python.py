@@ -94,7 +94,7 @@ def parse_python(file: SourceFile, *, deadline: float, max_symbols: int) -> Pars
             qualified_name=file.path,
             kind="module",
             start_line=1,
-            end_line=max(1, len(file.source.splitlines())),
+            end_line=max(1, file.source.count("\n") + (not file.source.endswith("\n"))),
             start_byte=0,
             end_byte=len(raw),
             has_errors=root.has_error,

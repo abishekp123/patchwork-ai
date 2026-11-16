@@ -9,8 +9,9 @@ from patchwork.migrations import MIGRATIONS
 
 
 @contextmanager
-def connect_database(path: Path) -> Iterator[sqlite3.Connection]:
-    with closing(sqlite3.connect(path, timeout=2)) as connection:
+def connect_database(path: Path, *, create: bool = False) -> Iterator[sqlite3.Connection]:
+    target = str(path) if create else f"{path.resolve().as_uri()}?mode=rw"
+    with closing(sqlite3.connect(target, timeout=2, uri=not create)) as connection:
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
         yield connection
@@ -19,7 +20,7 @@ def connect_database(path: Path) -> Iterator[sqlite3.Connection]:
 def initialize_database(path: Path) -> None:
     """Create the database on startup and fail fast if it cannot be opened."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    with connect_database(path) as connection, connection:
+    with connect_database(path, create=True) as connection, connection:
         connection.execute("BEGIN IMMEDIATE")
         version = connection.execute("PRAGMA user_version").fetchone()[0]
         if version > len(MIGRATIONS):

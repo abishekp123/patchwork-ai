@@ -118,7 +118,7 @@ class RepositoryStore:
                         file.size_bytes,
                         file.encoding,
                         file.source,
-                        max(1, len(file.source.splitlines())),
+                        max(1, file.source.count("\n") + (not file.source.endswith("\n"))),
                         parsed.has_errors,
                     ),
                 )
