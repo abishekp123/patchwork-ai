@@ -25,13 +25,21 @@ def initialize_database(path: Path) -> None:
         version = connection.execute("PRAGMA user_version").fetchone()[0]
         if version > len(MIGRATIONS):
             raise RuntimeError("Database schema is newer than this application")
-        for number, statements in enumerate(MIGRATIONS[version:], start=version + 1):
+        for statements in MIGRATIONS:
             for statement in statements:
-                connection.execute(statement)
-            if number == 1:
-                connection.execute("PRAGMA user_version = 1")
-        if version == 0:
-            connection.execute("PRAGMA user_version = 1")
+                try:
+                    connection.execute(statement)
+                except sqlite3.OperationalError as error:
+                    message = str(error).lower()
+                    if (
+                        "already exists" in message
+                        or "duplicate column" in message
+                        or "duplicate index" in message
+                        or "index already exists" in message
+                    ):
+                        continue
+                    raise
+        connection.execute("PRAGMA user_version = 1")
 
 
 def check_database(path: Path) -> None:

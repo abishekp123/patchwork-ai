@@ -51,11 +51,6 @@ MIGRATIONS: tuple[tuple[str, ...], ...] = (
         UNIQUE(file_id, start_byte)
     )""",
         "CREATE INDEX imports_module ON imports(repository_id, module_name)",
-    ),
-)
-
-MIGRATIONS += (
-    (
         """CREATE TABLE IF NOT EXISTS investigations (
         id TEXT PRIMARY KEY, repository_id TEXT NOT NULL REFERENCES repositories(id),
         commit_sha TEXT NOT NULL, description TEXT NOT NULL, status TEXT NOT NULL,
@@ -69,5 +64,26 @@ MIGRATIONS += (
     )""",
         "CREATE INDEX IF NOT EXISTS investigations_repository "
         "ON investigations(repository_id, created_at)",
+        """CREATE TABLE IF NOT EXISTS patches (
+        id TEXT PRIMARY KEY,
+        repository_id TEXT NOT NULL REFERENCES repositories(id),
+        commit_sha TEXT NOT NULL,
+        investigation_id TEXT REFERENCES investigations(id),
+        status TEXT NOT NULL CHECK(
+            status IN ('draft', 'pending_review', 'approved', 'rejected', 'failed', 'invalid')
+        ),
+        title TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        diff TEXT NOT NULL,
+        evidence_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        reviewed_at TEXT,
+        reviewer TEXT,
+        decision_reason TEXT,
+        error_code TEXT
+    )""",
+        "CREATE INDEX IF NOT EXISTS patches_repository_status "
+        "ON patches(repository_id, status, created_at)",
     ),
 )

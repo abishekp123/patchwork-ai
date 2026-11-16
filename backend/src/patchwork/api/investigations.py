@@ -23,7 +23,7 @@ ERROR_RESPONSES = {
     code: {"model": ErrorResponse} for code in (404, 409, 413, 422, 500, 502, 503, 504)
 }
 router = APIRouter(prefix="/investigations", tags=["investigations"], responses=ERROR_RESPONSES)
-Identifier = Annotated[str, Path(pattern=r"^[0-9a-f]{64}$")]
+Identifier = Annotated[str, Path(pattern=r"^[0-9a-f]{32}$")]
 Limit = Annotated[int, Query(ge=1, le=200)]
 Offset = Annotated[int, Query(ge=0, le=100_000)]
 

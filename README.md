@@ -1,15 +1,16 @@
 # Patchwork AI
 
 A platform for AI-assisted code investigation and verified repair.
-**Milestones 1–3 are implemented:** a FastAPI API, SQLite indexes, a React health
-dashboard, deterministic Python repository ingestion and code intelligence, and a
-bounded investigation orchestration loop built around read-only Repo tools and
-provider abstractions. Import public GitHub repositories at pinned commits,
-inspect Tree-sitter symbols and imports, search source without an LLM key, and
-run investigation sessions that validate source evidence before a reviewed report
-is accepted. Patch generation and isolated execution remain future milestones.
-Repository operations are API-only; the frontend remains the Milestone 1 health
-example while the backend exposes the investigation lifecycle.
+**Milestones 1–4 are implemented:** a FastAPI API, SQLite indexes, a React
+health dashboard, deterministic repository ingestion and code intelligence,
+a bounded investigation orchestration loop, and a reviewable patch workflow.
+Import public GitHub repositories at pinned commits, inspect Tree-sitter symbols
+and imports, search source without an LLM key, run investigation sessions that
+validate source evidence before a reviewed report is accepted, and create
+reviewable patch proposals that persist until a human approves or rejects them.
+Repository operations are API-only; the frontend exposes the health and review
+interfaces while the backend owns repository indexing, investigations, and patch
+approval state.
 
 ## Requirements
 

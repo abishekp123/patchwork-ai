@@ -1,6 +1,6 @@
 # Session handoff
 
-Date: 2026-11-16 (America/Toronto). Implemented scope: Milestone 3 investigation orchestration and verification.
+Date: 2026-11-16 (America/Toronto). Implemented scope: Milestone 4 repair synthesis and human review workflow.
 
 ## Current state
 
@@ -9,13 +9,14 @@ Date: 2026-11-16 (America/Toronto). Implemented scope: Milestone 3 investigation
 - Tree-sitter extracts modules, nested classes/functions/methods, async flags,
   decorators, signatures, locations, and literal imports. Malformed files retain
   recoverable symbols and explicit syntax-error flags.
-- SQLite migration 1 persists snapshot status/errors, files/hashes/source, symbols,
-  and imports. Claims, leases, constraints, and atomic publication prevent duplicate
-  or partially visible indexes. Ready pinned imports reuse the existing index.
+- SQLite persists snapshot status/errors, files/hashes/source, symbols, imports,
+  investigations, and reviewable patch records. Claims, leases, constraints, and
+  atomic publication prevent duplicate or partially visible indexes. Ready pinned
+  imports reuse the existing index.
 - Typed repository/files/symbols/imports/search APIs, bounded lexical ranking,
   consistent errors, and proxy-compatible aliases are implemented.
-- Investigation sessions now create persisted records with explicit lifecycle
-  states, bounded tool execution, provider integration, and evidence-backed report
+- Investigation sessions create persisted records with explicit lifecycle states,
+  bounded tool execution, provider integration, and evidence-backed report
   validation. The engine supports created/context retrieval/investigating/evidence
   review/completed/failed/cancelled/budget exhausted transitions and rejects
   invalid or stale citations before accepting a report.
@@ -23,8 +24,11 @@ Date: 2026-11-16 (America/Toronto). Implemented scope: Milestone 3 investigation
   uses environment credentials, retries transient network errors, and records
   usage metadata when available. Automated tests exercise mocked provider
   responses instead of requiring a live API key.
-- The backend exposes investigation APIs for create, fetch, steps, and cancel.
-  No repair generation, execution, or host code execution were added.
+- The backend exposes investigation APIs for create, fetch, steps, and cancel,
+  plus patch generation and approval/rejection endpoints.
+- Patch proposals are generated from indexed snapshots, validated against the
+  repository state, stored as unified diffs, and persisted through human approval
+  and rejection transitions in SQLite.
 
 ## Verification executed
 
