@@ -8,8 +8,12 @@ from patchwork.investigations.models import TERMINAL, Investigation
 from patchwork.investigations.security import redact
 from patchwork.repositories.store import timestamp
 
-TRANSITIONS = {'CREATED':'CONTEXT_RETRIEVAL', 'CONTEXT_RETRIEVAL':'INVESTIGATING',
-               'INVESTIGATING':'EVIDENCE_REVIEW', 'EVIDENCE_REVIEW':'COMPLETED'}
+TRANSITIONS = {
+    "CREATED": "CONTEXT_RETRIEVAL",
+    "CONTEXT_RETRIEVAL": "INVESTIGATING",
+    "INVESTIGATING": "EVIDENCE_REVIEW",
+    "EVIDENCE_REVIEW": "COMPLETED",
+}
 
 
 class Store:
@@ -19,24 +23,38 @@ class Store:
     def create(self, repository, description):
         identifier, now = uuid.uuid4().hex, timestamp()
         with connect_database(self.settings.database_path) as db, db:
-            db.execute('INSERT INTO investigations VALUES (?,?,?,?,?,?,?,?,?,?,?)',
-                       (identifier, repository.id, repository.commit_sha, redact(description),
-                        'CREATED', now, now, None, time.time()+self.settings.investigation_seconds,
-                        None, None))
+            db.execute(
+                "INSERT INTO investigations VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    identifier,
+                    repository.id,
+                    repository.commit_sha,
+                    redact(description),
+                    "CREATED",
+                    now,
+                    now,
+                    None,
+                    time.time() + self.settings.investigation_seconds,
+                    None,
+                    None,
+                ),
+            )
         return self.get(identifier)
 
     def get(self, identifier):
         with connect_database(self.settings.database_path) as db, db:
             # A crashed process cannot retain a live claim past its deadline.
-            db.execute("""UPDATE investigations SET status='FAILED', error_code='interrupted',
+            db.execute(
+                """UPDATE investigations SET status='FAILED', error_code='interrupted',
                        completed_at=?, updated_at=? WHERE expires < ?
                        AND status NOT IN ('COMPLETED','FAILED','CANCELLED','BUDGET_EXHAUSTED')""",
-                       (timestamp(), timestamp(), time.time()))
-            row = db.execute('SELECT * FROM investigations WHERE id=?', (identifier,)).fetchone()
+                (timestamp(), timestamp(), time.time()),
+            )
+            row = db.execute("SELECT * FROM investigations WHERE id=?", (identifier,)).fetchone()
         if row is None:
-            raise PatchworkError('investigation_not_found','Investigation not found.',404)
+            raise PatchworkError("investigation_not_found", "Investigation not found.", 404)
         data = dict(row)
-        data['report'] = json.loads(data['report']) if data['report'] else None
+        data["report"] = json.loads(data["report"]) if data["report"] else None
         return Investigation.model_validate(data)
 
     def transition(self, identifier, status, report=None, error=None):
@@ -94,6 +112,5 @@ class Store:
                 (identifier, limit, offset),
             ).fetchall()
         return [
-            {"sequence": row[0], "created_at": row[1], "data": json.loads(row[2])}
-            for row in rows
+            {"sequence": row[0], "created_at": row[1], "data": json.loads(row[2])} for row in rows
         ]

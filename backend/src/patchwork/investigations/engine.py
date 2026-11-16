@@ -54,9 +54,8 @@ async def run(settings, record, repository, provider):
                         503,
                     )
                 if (
-                    (tokens + reserve + 2000) * settings.model_token_usd
-                    > settings.investigation_cost_usd
-                ):
+                    tokens + reserve + 2000
+                ) * settings.model_token_usd > settings.investigation_cost_usd:
                     error = "cost_budget"
                     break
             tokens += reserve + 2000  # Reserve before dispatch, including ambiguous failures.
