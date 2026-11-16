@@ -20,6 +20,7 @@ class Settings(BaseModel):
     model_token_usd: float | None = Field(default=None, gt=0)
     verification_timeout_seconds: float = Field(default=60, gt=0, le=1800)
     verification_output_limit_bytes: int = Field(default=200_000, gt=0, le=2_000_000)
+    verification_trusted_roots: list[str] = Field(default_factory=list)
     sandbox_mode: str = Field(default="fake")
 
     database_path: Path = Path("data/patchwork.db")

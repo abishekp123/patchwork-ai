@@ -11,6 +11,7 @@ from patchwork.api.health import router as health_router
 from patchwork.api.investigations import router as investigations_router
 from patchwork.api.patches import router as patches_router
 from patchwork.api.repositories import router as repositories_router
+from patchwork.api.verifications import router as verifications_router
 from patchwork.config import Settings
 from patchwork.database import initialize_database
 
@@ -25,9 +26,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(title="Patchwork AI", version=__version__, lifespan=lifespan)
     app.state.settings = resolved_settings
+    app.state.verification_tasks = {}
     app.include_router(health_router)
     app.include_router(investigations_router, prefix="/api")
     app.include_router(patches_router, prefix="/api")
+    app.include_router(verifications_router, prefix="/api")
     app.include_router(repositories_router, prefix="/api")
     # Preserve the existing Vite proxy, which removes /api before forwarding.
     app.include_router(repositories_router, include_in_schema=False)

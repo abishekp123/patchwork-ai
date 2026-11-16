@@ -18,6 +18,7 @@ class SandboxConfig(BaseModel):
     no_new_privileges: bool = True
     user: str = "65532:65532"
     workdir: str = "/workspace"
+    trusted_roots: list[str] = Field(default_factory=list, max_length=20)
     extra_args: list[str] = Field(default_factory=list, max_length=20)
 
 

@@ -84,6 +84,25 @@ class VerificationStore:
             ).fetchall()
         return [self._decode(row) for row in rows], total
 
+    def list_for_patch(
+        self,
+        patch_id: str,
+        *,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> tuple[list[VerificationRecord], int]:
+        with connect_database(self.database_path) as connection:
+            total = connection.execute(
+                "SELECT count(*) FROM verifications WHERE patch_id = ?",
+                (patch_id,),
+            ).fetchone()[0]
+            rows = connection.execute(
+                "SELECT * FROM verifications WHERE patch_id = ? "
+                "ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                (patch_id, limit, offset),
+            ).fetchall()
+        return [self._decode(row) for row in rows], total
+
     def update(self, identifier: str, **payload) -> VerificationRecord:
         allowed = {
             "status",

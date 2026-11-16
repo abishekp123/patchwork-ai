@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import re
 import tempfile
 from pathlib import Path
@@ -10,6 +11,7 @@ from patchwork.errors import PatchworkError
 from patchwork.patches.store import PatchStore
 from patchwork.repositories.store import timestamp
 from patchwork.verifications.models import (
+    SandboxConfig,
     VerificationRecord,
     VerificationResult,
     VerificationSummary,
@@ -130,9 +132,7 @@ def _classify(baseline: VerificationSummary, patched: VerificationSummary) -> Ve
         reason = "The patched run failed where the baseline passed."
     else:
         status = "FAILED"
-        reason = (
-            "Both runs failed or the verification infrastructure could not compare them reliably."
-        )
+        reason = "Both runs failed or verification infrastructure could not compare them reliably."
     return VerificationResult(
         status=status,
         classification=status,
@@ -149,6 +149,19 @@ def _classify(baseline: VerificationSummary, patched: VerificationSummary) -> Ve
     )
 
 
+def _validate_command(command: str) -> str:
+    cleaned = command.strip()
+    if not cleaned:
+        raise PatchworkError("sandbox_policy", "Verification commands cannot be empty.", 422)
+    if re.fullmatch(r"(?:python(?:3)?\s+-m\s+pytest(?:\s+-q)?|pytest(?:\s+-q)?)", cleaned):
+        return cleaned
+    raise PatchworkError(
+        "sandbox_policy",
+        "Only allowlisted pytest commands are permitted for verification.",
+        422,
+    )
+
+
 async def run_verification(
     settings: Settings,
     patch_id: str,
@@ -158,6 +171,7 @@ async def run_verification(
     baseline_command: str,
     patched_command: str,
     sandbox_mode: str = "fake",
+    verification_id: str | None = None,
 ) -> VerificationRecord:
     patch = PatchStore(settings.database_path).get(patch_id)
     if patch.repository_id != repository_id or patch.commit_sha != commit_sha:
@@ -173,12 +187,19 @@ async def run_verification(
             409,
         )
 
+    baseline_command = _validate_command(baseline_command)
+    patched_command = _validate_command(patched_command)
+
     store = VerificationStore(settings.database_path)
-    record = store.create(
-        patch_id=patch_id,
-        repository_id=repository_id,
-        commit_sha=commit_sha,
-        sandbox_mode=sandbox_mode,
+    record = (
+        store.get(verification_id)
+        if verification_id is not None
+        else store.create(
+            patch_id=patch_id,
+            repository_id=repository_id,
+            commit_sha=commit_sha,
+            sandbox_mode=sandbox_mode,
+        )
     )
     baseline_dir = Path(tempfile.mkdtemp(prefix="patchwork-verify-base-"))
     patched_dir = Path(tempfile.mkdtemp(prefix="patchwork-verify-patched-"))
@@ -187,43 +208,94 @@ async def run_verification(
         _populate_snapshot(settings.database_path, repository_id, patched_dir)
         _apply_patch_to_snapshot(patched_dir, patch.diff)
 
-        sandbox = SandboxFactory.create(sandbox_mode)
+        sandbox = SandboxFactory.create(
+            sandbox_mode,
+            config=(
+                None
+                if sandbox_mode == "fake"
+                else SandboxConfig(
+                    mode="docker",
+                    trusted_roots=list(
+                        dict.fromkeys(
+                            [
+                                str(settings.repository_dir),
+                                str(baseline_dir.parent),
+                                *settings.verification_trusted_roots,
+                            ]
+                        )
+                    ),
+                    timeout_seconds=int(settings.verification_timeout_seconds),
+                )
+            ),
+        )
         store.update(
             record.id,
             status="RUNNING_BASELINE",
             updated_at=timestamp(),
             started_at=timestamp(),
         )
-        baseline_summary, baseline_stdout, baseline_stderr = sandbox.run(
-            command=baseline_command,
-            workspace=baseline_dir,
-            timeout_seconds=int(settings.verification_timeout_seconds),
-        )
-        store.update(
-            record.id,
-            status="RUNNING_PATCHED",
-            updated_at=timestamp(),
-            baseline_summary=baseline_summary,
-            execution_logs=[baseline_stdout, baseline_stderr],
-        )
-        patched_summary, patched_stdout, patched_stderr = sandbox.run(
-            command=patched_command,
-            workspace=patched_dir,
-            timeout_seconds=int(settings.verification_timeout_seconds),
-        )
-        comparison = _classify(baseline_summary, patched_summary)
-        comparison.logs = [patched_stdout, patched_stderr]
-        store.update(
-            record.id,
-            status="COMPLETED",
-            updated_at=timestamp(),
-            completed_at=timestamp(),
-            baseline_summary=baseline_summary,
-            patched_summary=patched_summary,
-            comparison=comparison,
-            execution_logs=[baseline_stdout, baseline_stderr, patched_stdout, patched_stderr],
-        )
-        return store.get(record.id)
+        try:
+            baseline_summary, baseline_stdout, baseline_stderr = sandbox.run(
+                command=baseline_command,
+                workspace=baseline_dir,
+                timeout_seconds=int(settings.verification_timeout_seconds),
+            )
+            store.update(
+                record.id,
+                status="RUNNING_PATCHED",
+                updated_at=timestamp(),
+                baseline_summary=baseline_summary,
+                execution_logs=[baseline_stdout, baseline_stderr],
+            )
+            patched_summary, patched_stdout, patched_stderr = sandbox.run(
+                command=patched_command,
+                workspace=patched_dir,
+                timeout_seconds=int(settings.verification_timeout_seconds),
+            )
+            comparison = _classify(baseline_summary, patched_summary)
+            comparison.logs = [patched_stdout, patched_stderr]
+            store.update(
+                record.id,
+                status="COMPLETED",
+                updated_at=timestamp(),
+                completed_at=timestamp(),
+                baseline_summary=baseline_summary,
+                patched_summary=patched_summary,
+                comparison=comparison,
+                execution_logs=[baseline_stdout, baseline_stderr, patched_stdout, patched_stderr],
+            )
+            return store.get(record.id)
+        except asyncio.CancelledError:
+            store.update(
+                record.id,
+                status="CANCELLED",
+                updated_at=timestamp(),
+                completed_at=timestamp(),
+                error_code="cancelled_by_user",
+            )
+            raise
+        except PatchworkError as error:
+            store.update(
+                record.id,
+                status="FAILED",
+                updated_at=timestamp(),
+                completed_at=timestamp(),
+                error_code=error.code,
+            )
+            raise
+        except Exception as error:  # pragma: no cover - defensive storage
+            store.update(
+                record.id,
+                status="FAILED",
+                updated_at=timestamp(),
+                completed_at=timestamp(),
+                error_code="verification_failed",
+            )
+            raise PatchworkError(
+                "verification_failed",
+                f"Verification failed: {error}",
+                500,
+            ) from error
     finally:
         for directory in (baseline_dir, patched_dir):
             if directory.exists():
