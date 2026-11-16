@@ -54,17 +54,20 @@ MIGRATIONS: tuple[tuple[str, ...], ...] = (
     ),
 )
 
-MIGRATIONS += ((
-    """CREATE TABLE investigations (
+MIGRATIONS += (
+    (
+        """CREATE TABLE IF NOT EXISTS investigations (
         id TEXT PRIMARY KEY, repository_id TEXT NOT NULL REFERENCES repositories(id),
         commit_sha TEXT NOT NULL, description TEXT NOT NULL, status TEXT NOT NULL,
         created_at TEXT NOT NULL, updated_at TEXT NOT NULL, completed_at TEXT,
         expires REAL NOT NULL, report TEXT, error_code TEXT
     )""",
-    """CREATE TABLE investigation_steps (
+        """CREATE TABLE IF NOT EXISTS investigation_steps (
         investigation_id TEXT NOT NULL REFERENCES investigations(id),
         sequence INTEGER NOT NULL, created_at TEXT NOT NULL, data TEXT NOT NULL,
         PRIMARY KEY(investigation_id, sequence)
     )""",
-    "CREATE INDEX investigations_repository ON investigations(repository_id, created_at)",
-),)
+        "CREATE INDEX IF NOT EXISTS investigations_repository "
+        "ON investigations(repository_id, created_at)",
+    ),
+)

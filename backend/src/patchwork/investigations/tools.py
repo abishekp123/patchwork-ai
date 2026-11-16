@@ -46,6 +46,8 @@ class Tools:
                 raise PatchworkError("tool_not_allowed", "Unknown read-only tool.")
             args = SCHEMAS[name].model_validate(arguments)
             repo = self.repository
+            if repo.status != "ready":
+                raise PatchworkError("index_not_ready", "Repository index is not ready.", 409)
             if name == "search_code":
                 result = search.search(self.settings, repo, args.query, 5).model_dump()
             elif name == "find_symbols":
@@ -108,10 +110,9 @@ class Tools:
                 }
             return {"ok": True, "data": result}
         except (PatchworkError, ValidationError) as error:
-            return {
-                "ok": False,
-                "error": error.code if isinstance(error, PatchworkError) else "invalid_arguments",
-            }
+            code = error.code if isinstance(error, PatchworkError) else "invalid_arguments"
+            message = error.message if isinstance(error, PatchworkError) else str(error)
+            return {"ok": False, "error": code, "message": message}
 
     def review(self, arguments: dict) -> dict:
         draft = ReportDraft.model_validate(arguments)

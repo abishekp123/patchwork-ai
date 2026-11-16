@@ -41,26 +41,45 @@ class Store:
 
     def transition(self, identifier, status, report=None, error=None):
         with connect_database(self.settings.database_path) as db, db:
-            db.execute('BEGIN IMMEDIATE')
-            previous = db.execute('SELECT status FROM investigations WHERE id=?',(identifier,)).fetchone()[0]
+            db.execute("BEGIN IMMEDIATE")
+            previous = db.execute(
+                "SELECT status FROM investigations WHERE id=?",
+                (identifier,),
+            ).fetchone()[0]
             if previous in TERMINAL:
                 return
-            if status not in {'FAILED','CANCELLED','BUDGET_EXHAUSTED'} and TRANSITIONS.get(previous) != status:
-                raise ValueError('Invalid investigation transition')
-            if status == 'COMPLETED' and report is None:
-                raise ValueError('Completion requires reviewed report')
+            if (
+                status not in {"FAILED", "CANCELLED", "BUDGET_EXHAUSTED"}
+                and TRANSITIONS.get(previous) != status
+            ):
+                raise ValueError("Invalid investigation transition")
+            if status == "COMPLETED" and report is None:
+                raise ValueError("Completion requires reviewed report")
             now = timestamp()
-            db.execute('UPDATE investigations SET status=?,updated_at=?,completed_at=?,report=?,error_code=? WHERE id=?',
-                       (status, now, now if status in TERMINAL else None,
-                        redact(json.dumps(report)) if report else None, error, identifier))
-            self._step(db, identifier, {'transition':status})
+            db.execute(
+                "UPDATE investigations SET status=?,updated_at=?,completed_at=?,"
+                "report=?,error_code=? WHERE id=?",
+                (
+                    status,
+                    now,
+                    now if status in TERMINAL else None,
+                    redact(json.dumps(report)) if report else None,
+                    error,
+                    identifier,
+                ),
+            )
+            self._step(db, identifier, {"transition": status})
 
     def _step(self, db, identifier, data):
         encoded = redact(json.dumps(data))
         if len(encoded.encode()) > 20000:
-            encoded = json.dumps({'error':'trace_output_limit'})
-        db.execute('INSERT INTO investigation_steps SELECT ?, coalesce(max(sequence),0)+1, ?, ? FROM investigation_steps WHERE investigation_id=?',
-                   (identifier,timestamp(),encoded,identifier))
+            encoded = json.dumps({"error": "trace_output_limit"})
+        db.execute(
+            "INSERT INTO investigation_steps "
+            "SELECT ?, coalesce(max(sequence),0)+1, ?, ? FROM investigation_steps "
+            "WHERE investigation_id=?",
+            (identifier, timestamp(), encoded, identifier),
+        )
 
     def step(self, identifier, data):
         with connect_database(self.settings.database_path) as db, db:
@@ -69,5 +88,12 @@ class Store:
     def steps(self, identifier, limit=50, offset=0):
         self.get(identifier)
         with connect_database(self.settings.database_path) as db:
-            rows = db.execute('SELECT sequence,created_at,data FROM investigation_steps WHERE investigation_id=? ORDER BY sequence LIMIT ? OFFSET ?', (identifier,limit,offset)).fetchall()
-        return [{'sequence':row[0],'created_at':row[1],'data':json.loads(row[2])} for row in rows]
+            rows = db.execute(
+                "SELECT sequence,created_at,data FROM investigation_steps "
+                "WHERE investigation_id=? ORDER BY sequence LIMIT ? OFFSET ?",
+                (identifier, limit, offset),
+            ).fetchall()
+        return [
+            {"sequence": row[0], "created_at": row[1], "data": json.loads(row[2])}
+            for row in rows
+        ]

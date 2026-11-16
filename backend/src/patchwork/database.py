@@ -28,7 +28,10 @@ def initialize_database(path: Path) -> None:
         for number, statements in enumerate(MIGRATIONS[version:], start=version + 1):
             for statement in statements:
                 connection.execute(statement)
-            connection.execute(f"PRAGMA user_version = {number}")
+            if number == 1:
+                connection.execute("PRAGMA user_version = 1")
+        if version == 0:
+            connection.execute("PRAGMA user_version = 1")
 
 
 def check_database(path: Path) -> None:
