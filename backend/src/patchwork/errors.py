@@ -1,0 +1,10 @@
+"""Stable application failures; upstream stderr and local paths stay private."""
+
+
+class PatchworkError(Exception):
+    def __init__(self, code: str, message: str, status_code: int = 422) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.status_code = status_code
+        self.repository_id: str | None = None
