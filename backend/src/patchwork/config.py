@@ -18,6 +18,9 @@ class Settings(BaseModel):
     tool_timeout_seconds: float = Field(default=2, gt=0, le=10)
     investigation_cost_usd: float | None = Field(default=None, gt=0)
     model_token_usd: float | None = Field(default=None, gt=0)
+    verification_timeout_seconds: float = Field(default=60, gt=0, le=1800)
+    verification_output_limit_bytes: int = Field(default=200_000, gt=0, le=2_000_000)
+    sandbox_mode: str = Field(default="fake")
 
     database_path: Path = Path("data/patchwork.db")
     repository_dir: Path = Path.home() / ".local/share/patchwork-ai/repositories"

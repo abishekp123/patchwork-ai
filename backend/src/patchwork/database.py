@@ -25,7 +25,9 @@ def initialize_database(path: Path) -> None:
         version = connection.execute("PRAGMA user_version").fetchone()[0]
         if version > len(MIGRATIONS):
             raise RuntimeError("Database schema is newer than this application")
-        for statements in MIGRATIONS:
+        for index, statements in enumerate(MIGRATIONS, start=1):
+            if version >= index:
+                continue
             for statement in statements:
                 try:
                     connection.execute(statement)
@@ -39,7 +41,7 @@ def initialize_database(path: Path) -> None:
                     ):
                         continue
                     raise
-        connection.execute("PRAGMA user_version = 1")
+        connection.execute(f"PRAGMA user_version = {len(MIGRATIONS)}")
 
 
 def check_database(path: Path) -> None:

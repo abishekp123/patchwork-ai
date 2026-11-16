@@ -5,7 +5,9 @@ A platform for AI-assisted code investigation and verified repair.
 health dashboard, deterministic repository ingestion and code intelligence,
 a bounded investigation orchestration loop, a reviewable patch workflow, and a
 hardening pass covering evidence validation, path safety, and review-state
-conflict prevention.
+conflict prevention. The active **Milestone 5 foundation** adds a fail-closed
+sandbox verification layer that validates approved patches in isolated snapshot
+runs without executing untrusted code on the host.
 Import public GitHub repositories at pinned commits, inspect Tree-sitter symbols
 and imports, search source without an LLM key, run investigation sessions that
 validate source evidence before a reviewed report is accepted, and create

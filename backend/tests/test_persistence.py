@@ -9,6 +9,7 @@ from patchwork.config import Settings
 from patchwork.database import connect_database, initialize_database
 from patchwork.errors import PatchworkError
 from patchwork.ingestion.git import GitClient
+from patchwork.migrations import MIGRATIONS
 from patchwork.repositories.service import ingest_repository
 from patchwork.repositories.store import RepositoryStore, repository_id
 
@@ -20,7 +21,7 @@ def test_migration_is_repeatable_and_preserves_existing_database(settings: Setti
     initialize_database(settings.database_path)
     initialize_database(settings.database_path)
     with connect_database(settings.database_path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == len(MIGRATIONS)
         assert connection.execute("SELECT value FROM prior_data").fetchone()[0] == "preserved"
         assert connection.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 

@@ -86,4 +86,29 @@ MIGRATIONS: tuple[tuple[str, ...], ...] = (
         "CREATE INDEX IF NOT EXISTS patches_repository_status "
         "ON patches(repository_id, status, created_at)",
     ),
+    (
+        """CREATE TABLE IF NOT EXISTS verifications (
+        id TEXT PRIMARY KEY,
+        patch_id TEXT NOT NULL REFERENCES patches(id),
+        repository_id TEXT NOT NULL REFERENCES repositories(id),
+        commit_sha TEXT NOT NULL,
+        status TEXT NOT NULL CHECK(
+            status IN (
+                'CREATED', 'PREPARING', 'RUNNING_BASELINE', 'RUNNING_PATCHED',
+                'COMPARING', 'COMPLETED', 'FAILED', 'CANCELLED'
+            )
+        ),
+        sandbox_mode TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        started_at TEXT,
+        completed_at TEXT,
+        baseline_summary TEXT,
+        patched_summary TEXT,
+        comparison_json TEXT,
+        error_code TEXT,
+        execution_logs_json TEXT NOT NULL DEFAULT '[]'
+    )""",
+        "CREATE INDEX IF NOT EXISTS verifications_patch ON verifications(patch_id, created_at)",
+    ),
 )

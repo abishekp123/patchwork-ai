@@ -31,6 +31,11 @@ Date: 2026-11-16 (America/Toronto). Implemented scope: Milestone 4.1 hardening a
   cross-repository references, duplicate or overlapping edits, traversal paths,
   no-op or syntax-invalid changes, and repeated review-state transitions. Patch
   review now refuses second approvals or rejections after a patch is resolved.
+- The sandbox verification foundation adds a fail-closed adapter, deterministic
+  verification models, persisted verification records, and isolated baseline-vs-
+  patched comparisons for approved patch records. The fake sandbox adapter keeps
+  offline unit tests deterministic while Docker remains a strict opt-in execution
+  environment when available.
 - Frontend review panels cover loading, empty, approval, rejection, and API-error
   states using deterministic mocked fetch responses.
 

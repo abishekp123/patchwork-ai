@@ -1,10 +1,65 @@
+import asyncio
 from pathlib import Path
 
 import pytest
 
+from patchwork.config import Settings
+from patchwork.database import initialize_database
 from patchwork.errors import PatchworkError
+from patchwork.ingestion.discovery import SourceFile
+from patchwork.intelligence.models import Import, ParsedFile, Symbol
+from patchwork.patches.engine import PatchChange, PatchProposal
+from patchwork.patches.store import PatchStore
+from patchwork.repositories.store import RepositoryStore
+from patchwork.verifications.engine import run_verification
 from patchwork.verifications.models import SandboxConfig
 from patchwork.verifications.sandbox import FakeSandboxAdapter, SandboxAdapter, SandboxFactory
+from patchwork.verifications.store import VerificationStore
+
+
+def _ready_repository(settings: Settings):
+    initialize_database(settings.database_path)
+    store = RepositoryStore(settings.database_path)
+    repository, token = store.claim("https://github.com/example/python-project", "a" * 40, 10)
+    assert token is not None
+    parsed = ParsedFile(
+        file=SourceFile(
+            path="example.py",
+            content_hash="abc123",
+            size_bytes=20,
+            encoding="utf-8",
+            source="def bug():\n    return 1\n",
+        ),
+        has_errors=False,
+        symbols=(
+            Symbol(
+                path="example.py",
+                name="bug",
+                qualified_name="bug",
+                kind="function",
+                parent=None,
+                start_line=1,
+                end_line=2,
+                start_byte=0,
+                end_byte=12,
+            ),
+        ),
+        imports=(
+            Import(
+                path="example.py",
+                module_name="os",
+                imported_name="path",
+                alias=None,
+                relative_level=0,
+                scope=None,
+                start_line=1,
+                end_line=1,
+                start_byte=0,
+                statement="import os",
+            ),
+        ),
+    )
+    return store.publish(repository.id, token, [parsed], {}, "fixture.git")
 
 
 def test_fake_sandbox_returns_test_summary():
@@ -54,3 +109,71 @@ def test_docker_adapter_reports_unavailable_when_not_installed(monkeypatch):
     monkeypatch.setattr("patchwork.verifications.sandbox.shutil.which", lambda _: None)
     adapter = SandboxAdapter(SandboxConfig(mode="docker"))
     assert adapter.available() is False
+
+
+def test_verification_engine_runs_for_approved_patch(settings: Settings):
+    repository = _ready_repository(settings)
+    proposal = PatchProposal(
+        title="Guard the bug path",
+        summary="This patch keeps the reviewed repair traceable.",
+        changes=[
+            PatchChange(
+                path="example.py",
+                before="def bug():\n    return 1\n",
+                after="def bug():\n    return 1\n# verified patch\n",
+                reason="Keep the change explicit for review.",
+            )
+        ],
+        evidence_ids=[],
+    )
+    patch = PatchStore(settings.database_path).create(repository, proposal)
+    approved = PatchStore(settings.database_path).transition(
+        patch.id,
+        "approved",
+        reviewer="human",
+        reason="Ready for runtime verification.",
+    )
+    assert approved.status == "approved"
+
+    record = asyncio.run(
+        run_verification(
+            settings,
+            approved.id,
+            repository_id=repository.id,
+            commit_sha=repository.commit_sha,
+            baseline_command="python -m pytest -q",
+            patched_command="python -m pytest -q",
+            sandbox_mode="fake",
+        )
+    )
+    assert record.status == "COMPLETED"
+    assert record.comparison is not None
+    assert record.comparison.status == "UNCHANGED"
+    assert record.baseline_summary is not None
+    assert record.patched_summary is not None
+
+
+def test_verification_store_rejects_invalid_status_updates(settings: Settings):
+    repository = _ready_repository(settings)
+    proposal = PatchProposal(
+        title="Status check",
+        summary="Validate store transitions.",
+        changes=[
+            PatchChange(
+                path="example.py",
+                before="def bug():\n    return 1\n",
+                after="def bug():\n    return 2\n",
+                reason="Exercise the verification lifecycle.",
+            )
+        ],
+        evidence_ids=[],
+    )
+    patch = PatchStore(settings.database_path).create(repository, proposal)
+    record = VerificationStore(settings.database_path).create(
+        patch_id=patch.id,
+        repository_id=repository.id,
+        commit_sha=repository.commit_sha,
+        sandbox_mode="fake",
+    )
+    with pytest.raises(ValueError, match="Unsupported verification status"):
+        VerificationStore(settings.database_path).update(record.id, status="NOT_REAL")
