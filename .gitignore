@@ -1,0 +1,35 @@
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# JavaScript and build output
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Local persistence
+data/
+*.db
+*.db-*
+*.sqlite*
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/
+*.log
