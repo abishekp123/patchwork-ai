@@ -9,6 +9,16 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 class Settings(BaseModel):
     model_config = ConfigDict(frozen=True, validate_default=True)
 
+    investigation_model: str = "gpt-4.1-mini"
+    provider_timeout_seconds: float = Field(default=30, gt=0, le=120)
+    investigation_seconds: float = Field(default=120, gt=0, le=600)
+    investigation_steps: int = Field(default=12, ge=1, le=30)
+    investigation_tokens: int = Field(default=100000, ge=1, le=1000000)
+    investigation_context_bytes: int = Field(default=60000, ge=1000, le=100000)
+    tool_timeout_seconds: float = Field(default=2, gt=0, le=10)
+    investigation_cost_usd: float | None = Field(default=None, gt=0)
+    model_token_usd: float | None = Field(default=None, gt=0)
+
     database_path: Path = Path("data/patchwork.db")
     repository_dir: Path = Path.home() / ".local/share/patchwork-ai/repositories"
     clone_timeout_seconds: float = Field(default=60, gt=0, le=600)
