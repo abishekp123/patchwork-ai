@@ -128,3 +128,89 @@ def test_resolution_failure_is_recorded(settings: Settings) -> None:
         ingest_repository(settings, PUBLIC_URL, client_type=Unavailable)
     record = RepositoryStore(settings.database_path).get(repository_id(PUBLIC_URL, None))
     assert record.commit_sha is None and record.status == "failed"
+
+
+def test_concurrent_claims_have_one_owner(settings: Settings) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    initialize_database(settings.database_path)
+    barrier = Barrier(2)
+
+    def claim() -> str:
+        barrier.wait(timeout=5)
+        try:
+            _, token = RepositoryStore(settings.database_path).claim(PUBLIC_URL, "a" * 40, 10)
+            assert token
+            return "claimed"
+        except PatchworkError as error:
+            return error.code
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        outcomes = list(executor.map(lambda _i: claim(), range(2)))
+    assert sorted(outcomes) == ["claimed", "ingestion_in_progress"]
+
+
+def test_repeat_pinned_import_does_not_contact_remote(
+    settings: Settings, client_type: type[GitClient], local_repo: tuple[Path, str, str]
+) -> None:
+    initialize_database(settings.database_path)
+    first, _ = ingest_repository(settings, PUBLIC_URL, local_repo[1], client_type=client_type)
+
+    class NoNetwork(GitClient):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            raise AssertionError("Repeat pinned import must not create a transport")
+
+    repeated, reused = ingest_repository(settings, PUBLIC_URL, local_repo[1], client_type=NoNetwork)
+    assert reused and repeated == first
+
+
+def test_publication_failure_cleans_snapshot_and_records_failure(
+    settings: Settings,
+    client_type: type[GitClient],
+    local_repo: tuple[Path, str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    initialize_database(settings.database_path)
+
+    def fail_publish(*args: object, **kwargs: object) -> None:
+        raise PatchworkError("publication_failed", "Test publication failure", 503)
+
+    monkeypatch.setattr(RepositoryStore, "publish", fail_publish)
+    with pytest.raises(PatchworkError) as failure:
+        ingest_repository(settings, PUBLIC_URL, local_repo[1], client_type=client_type)
+    assert failure.value.repository_id
+    record = RepositoryStore(settings.database_path).get(failure.value.repository_id)
+    assert record.status == "failed" and record.file_count == 0
+    assert list(settings.repository_dir.iterdir()) == []
+
+
+def test_publication_deadline_rolls_back(settings: Settings) -> None:
+    initialize_database(settings.database_path)
+    store = RepositoryStore(settings.database_path)
+    record, token = store.claim(PUBLIC_URL, "a" * 40, 10)
+    assert token
+    with pytest.raises(PatchworkError) as failure:
+        store.publish(record.id, token, [parse("def run(): pass\n")], {}, "test.git", deadline=0)
+    assert failure.value.code == "ingestion_timeout"
+    with connect_database(settings.database_path) as connection:
+        assert connection.execute("SELECT count(*) FROM files").fetchone()[0] == 0
+
+
+def test_foreign_keys_reject_cross_repository_symbols(settings: Settings) -> None:
+    initialize_database(settings.database_path)
+    store = RepositoryStore(settings.database_path)
+    first, token = store.claim(PUBLIC_URL, "a" * 40, 10)
+    assert token
+    store.publish(first.id, token, [parse("def run(): pass\n")], {}, "first.git")
+    second, _ = store.claim(PUBLIC_URL, "b" * 40, 10)
+    with connect_database(settings.database_path) as connection, connection:
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute("UPDATE symbols SET repository_id = ?", (second.id,))
+
+
+def test_newer_schema_is_rejected(settings: Settings) -> None:
+    with sqlite3.connect(settings.database_path) as connection:
+        connection.execute("PRAGMA user_version = 99")
+    with pytest.raises(RuntimeError, match="newer"):
+        initialize_database(settings.database_path)

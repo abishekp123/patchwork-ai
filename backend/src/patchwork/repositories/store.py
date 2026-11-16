@@ -36,7 +36,7 @@ class RepositoryStore:
             raise PatchworkError("repository_not_found", "Repository snapshot was not found.", 404)
         return as_repository(dict(row))
 
-    def list(self, limit: int, offset: int) -> tuple[list[Repository], int]:
+    def list_repositories(self, limit: int, offset: int) -> tuple[list[Repository], int]:
         with connect_database(self.database_path) as connection:
             total = connection.execute("SELECT count(*) FROM repositories").fetchone()[0]
             rows = connection.execute(
@@ -93,9 +93,13 @@ class RepositoryStore:
         files: list[ParsedFile],
         skipped: dict[str, int],
         snapshot_name: str,
+        *,
+        deadline: float | None = None,
     ) -> Repository:
         now = timestamp()
         with connect_database(self.database_path) as connection, connection:
+            if deadline is not None:
+                connection.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1000)
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
                 "SELECT lease_token, status FROM repositories WHERE id = ?", (identifier,)
@@ -106,6 +110,8 @@ class RepositoryStore:
                 )
             connection.execute("DELETE FROM files WHERE repository_id = ?", (identifier,))
             for parsed in files:
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise PatchworkError("ingestion_timeout", "Index publication timed out.", 504)
                 file = parsed.file
                 cursor = connection.execute(
                     """INSERT INTO files (repository_id, path, path_key, content_hash, size_bytes,
@@ -159,6 +165,8 @@ class RepositoryStore:
                         for item in parsed.imports
                     ],
                 )
+            if deadline is not None and time.monotonic() >= deadline:
+                raise PatchworkError("ingestion_timeout", "Index publication timed out.", 504)
             connection.execute(
                 """UPDATE repositories SET status = 'ready', updated_at = ?, indexed_at = ?,
                 snapshot_name = ?, file_count = ?, symbol_count = ?, import_count = ?,

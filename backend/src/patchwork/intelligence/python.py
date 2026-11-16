@@ -80,10 +80,15 @@ def parse_python(file: SourceFile, *, deadline: float, max_symbols: int) -> Pars
     check_budget()
     raw = file.source.encode("utf-8")
     parser = Parser(LANGUAGE)
-    tree = parser.parse(
-        lambda offset, _point: raw[offset : offset + 8192],
-        progress_callback=lambda _offset, _has_error: time.monotonic() >= deadline,
-    )
+    try:
+        tree = parser.parse(
+            lambda offset, _point: raw[offset : offset + 8192],
+            progress_callback=lambda _offset, _has_error: time.monotonic() >= deadline,
+        )
+    except ValueError:
+        # py-tree-sitter raises ValueError when its progress callback cancels parsing.
+        check_budget()
+        raise PatchworkError("parse_failed", "Python syntax parsing failed.") from None
     if tree is None:
         raise PatchworkError("ingestion_timeout", "Python indexing timed out.", 504)
     root = tree.root_node

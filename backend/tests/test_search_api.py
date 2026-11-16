@@ -1,3 +1,4 @@
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -13,7 +14,7 @@ from patchwork.schemas.repositories import ImportResponse, SearchResponse
 
 
 @pytest.fixture
-def api(settings: Settings, client_type: type[GitClient]):
+def api(settings: Settings, client_type: type[GitClient]) -> Iterator[TestClient]:
     app = create_app(settings)
     app.dependency_overrides[git_client_type] = lambda: client_type
     with TestClient(app) as client:

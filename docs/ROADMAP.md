@@ -1,20 +1,20 @@
 # Roadmap
 
-1. **Foundation — implemented.** Modular API and UI, SQLite connectivity,
-   health contract, checks, CI, and project documentation.
-2. **Repository intake and bug reports.** Import a selected GitHub repository at
-   an immutable commit, validate inputs and paths, persist metadata with initial
-   migrations, and add a small dashboard flow. Never run imported code on the host.
-3. **Code intelligence.** File inventory, ripgrep retrieval, Tree-sitter symbols
-   and references, and evidence links pinned to source revisions.
-4. **Investigation and proposed repair.** Typed tools and structured agent steps,
-   bounded model calls, reviewable traces, and proposed diffs. No automatic merge.
-5. **Isolated verification.** Restricted disposable Docker execution, explicit
-   resource/network policies, test output capture, and verification status.
-6. **Durability and evaluation.** Persisted run state, cancellation/retry semantics,
-   replayable traces, and a versioned bug dataset with measured repair quality.
-7. **Production hardening.** Authentication/authorization, observability,
-   deployment, abuse limits, and storage/execution scaling based on measured need.
+1. **Foundation — implemented.** Modular API/UI, SQLite, health checks, CI, docs.
+2. **Repository ingestion and code intelligence — implemented.** Public GitHub
+   snapshots pinned to commits, secure Python discovery, Tree-sitter extraction,
+   transactional indexes, and typed lexical/symbol retrieval APIs.
+3. **Evidence-based investigation.** Bug-report/session persistence, structured
+   investigator tools over this index, bounded orchestration, and reviewable
+   evidence/traces. Define measurable evaluation cases before expanding autonomy.
+4. **Proposed repair and isolated verification.** Reviewable patches and restricted
+   disposable Docker execution with time/resource/network policies. No host execution
+   of imported code and no automatic merge.
+5. **Durability and evaluation.** Persisted run state, cancellation/retries,
+   replayable traces, and measured investigation/repair quality on versioned cases.
+6. **Production hardening.** Authentication/authorization, observability, deployment,
+   quotas, snapshot garbage collection, and scaling based on measured need.
 
-Each milestone requires explicit authorization. Only Milestone 1 is in scope
-for the initial implementation.
+The user revised Milestone 2 to include code intelligence. Bug reports and an
+investigation UI remain future scope. Every later milestone requires explicit
+approval; no Milestone 3 implementation is included here.

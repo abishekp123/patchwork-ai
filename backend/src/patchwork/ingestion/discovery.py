@@ -53,6 +53,12 @@ def discover(
     if len(entries) - 1 > settings.max_tree_entries:
         raise PatchworkError("too_many_files", "Repository tree exceeds the entry limit.", 413)
     files: list[SourceFile] = []
+    # Also detect virtual environments with nonstandard directory names.
+    environment_roots = {
+        entry.split(b"\t", 1)[-1].rsplit(b"/", 1)[0]
+        for entry in entries
+        if entry.endswith(b"/pyvenv.cfg")
+    }
     skipped: Counter[str] = Counter()
     expanded_size = source_size = 0
     for entry in sorted(filter(None, entries), key=lambda entry: entry.split(b"\t", 1)[-1]):
@@ -72,7 +78,10 @@ def discover(
             skipped["invalid_path_encoding"] += 1
             continue
         parts = path.split("/")
-        if any(part in IGNORED or part.endswith(".egg-info") for part in parts[:-1]):
+        raw_parts = raw_path.split(b"/")
+        if any(part in IGNORED or part.endswith(".egg-info") for part in parts[:-1]) or any(
+            b"/".join(raw_parts[:i]) in environment_roots for i in range(1, len(raw_parts))
+        ):
             skipped["ignored_directory"] += 1
             continue
         if mode not in {b"100644", b"100755"} or kind != b"blob":
@@ -85,13 +94,6 @@ def discover(
         if size > settings.max_file_bytes:
             skipped["oversized_file"] += 1
             continue
-        if (
-            len(files) >= settings.max_python_files
-            or source_size + size > settings.max_source_bytes
-        ):
-            raise PatchworkError(
-                "index_too_large", "Python sources exceed the indexing limit.", 413
-            )
         raw = client.blob(oid.decode("ascii"), size)
         if b"\x00" in raw:
             skipped["binary_file"] += 1
@@ -103,9 +105,9 @@ def discover(
             skipped["invalid_encoding"] += 1
             continue
         source_size += max(size, len(source.encode("utf-8")))
-        if source_size > settings.max_source_bytes:
+        if len(files) >= settings.max_python_files or source_size > settings.max_source_bytes:
             raise PatchworkError(
-                "index_too_large", "Decoded sources exceed the indexing limit.", 413
+                "index_too_large", "Python sources exceed the indexing limit.", 413
             )
         files.append(SourceFile(path, hashlib.sha256(raw).hexdigest(), size, encoding, source))
     return files, dict(sorted(skipped.items()))

@@ -178,3 +178,80 @@ def test_git_ignores_ambient_config(git_client: GitClient, monkeypatch: pytest.M
     assert b"protocol.allow=never" in result
     assert b"http.followredirects=false" in result
     assert not os.path.exists(git_client.workspace / "should-not-exist")
+
+
+def test_custom_virtualenv_and_submodule_are_not_indexed(
+    git_client: GitClient, local_repo: tuple[Path, str, str], settings: Settings
+) -> None:
+    root, _, commit = local_repo
+    (root / "custom-env").mkdir()
+    (root / "custom-env/pyvenv.cfg").write_text("home = /irrelevant")
+    (root / "custom-env/secret.py").write_text("raise Exception('not source')")
+    git(root, "add", ".")
+    git(root, "update-index", "--add", "--cacheinfo", f"160000,{commit},dependency")
+    git(root, "commit", "-m", "Environment and gitlink")
+    commit = git(root, "rev-parse", "HEAD")
+    git_client.fetch(PUBLIC_URL, commit)
+    files, skipped = discover(git_client, commit, settings)
+    assert [file.path for file in files] == ["main.py"]
+    assert skipped["ignored_directory"] == 2
+    assert skipped["symlink_or_submodule"] == 1
+
+
+def test_repository_disk_limit(git_client: GitClient) -> None:
+    git_client.settings = git_client.settings.model_copy(update={"max_repository_bytes": 1})
+    with pytest.raises(PatchworkError) as failure:
+        git_client.fetch(PUBLIC_URL, "a" * 40)
+    assert failure.value.code == "repository_too_large"
+
+
+def test_expanded_blob_size_limit(
+    git_client: GitClient, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A compressed object can be small on disk but huge when expanded; tree sizes catch it.
+    tree = b"100644 blob " + b"a" * 40 + b" 1000000\tcompressed.py\0"
+    monkeypatch.setattr(git_client, "tree", lambda _commit: tree)
+    with pytest.raises(PatchworkError) as failure:
+        discover(git_client, "a" * 40, settings.model_copy(update={"max_repository_bytes": 100}))
+    assert failure.value.code == "repository_too_large"
+
+
+def test_python_file_count_limit(
+    git_client: GitClient, settings: Settings, local_repo: tuple[Path, str, str]
+) -> None:
+    root = local_repo[0]
+    (root / "second.py").write_text("x = 1\n")
+    git(root, "add", ".")
+    git(root, "commit", "-m", "Second Python file")
+    commit = git(root, "rev-parse", "HEAD")
+    git_client.fetch(PUBLIC_URL, commit)
+    with pytest.raises(PatchworkError) as failure:
+        discover(git_client, commit, settings.model_copy(update={"max_python_files": 1}))
+    assert failure.value.code == "index_too_large"
+
+
+def test_discovery_rejects_unsafe_git_tree_paths(
+    git_client: GitClient, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tree = b"100644 blob " + b"a" * 40 + b" 1\t../escape.py\0"
+    monkeypatch.setattr(git_client, "tree", lambda _commit: tree)
+    with pytest.raises(PatchworkError) as failure:
+        discover(git_client, "a" * 40, settings)
+    assert failure.value.code == "unsafe_path"
+
+
+def test_skipped_binary_does_not_consume_index_limits(
+    git_client: GitClient, settings: Settings, local_repo: tuple[Path, str, str]
+) -> None:
+    root = local_repo[0]
+    (root / "zzz_binary.py").write_bytes(b"\x00" * 100)
+    git(root, "add", ".")
+    git(root, "commit", "-m", "Binary after valid source")
+    commit = git(root, "rev-parse", "HEAD")
+    git_client.fetch(PUBLIC_URL, commit)
+    files, skipped = discover(
+        git_client,
+        commit,
+        settings.model_copy(update={"max_python_files": 1, "max_source_bytes": 40}),
+    )
+    assert len(files) == 1 and skipped["binary_file"] == 1

@@ -5,6 +5,7 @@ import shutil
 import signal
 import subprocess
 import time
+from contextlib import suppress
 from pathlib import Path
 
 from patchwork.config import Settings
@@ -104,7 +105,8 @@ class GitClient:
                     time.sleep(0.02)
             finally:
                 if process.poll() is None:
-                    os.killpg(process.pid, signal.SIGKILL)
+                    with suppress(ProcessLookupError):
+                        os.killpg(process.pid, signal.SIGKILL)
                 process.wait()
         if process.returncode:
             detail = error_path.read_bytes().lower()

@@ -73,7 +73,7 @@ def import_repository(
 @router.get("", response_model=Page[Repository])
 def list_repositories(settings: Config, limit: Limit = 20, offset: Offset = 0) -> Page[Repository]:
     limit = min(limit, settings.max_results)
-    items, total = RepositoryStore(settings.database_path).list(limit, offset)
+    items, total = RepositoryStore(settings.database_path).list_repositories(limit, offset)
     return Page(items=items, total=total, limit=limit, offset=offset)
 
 

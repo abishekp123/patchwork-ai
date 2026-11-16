@@ -25,9 +25,10 @@ class Settings(BaseModel):
     @field_validator("repository_dir")
     @classmethod
     def external_storage(cls, value: Path) -> Path:
+        value = value.expanduser()
         if value.is_symlink():
             raise ValueError("Repository storage must not be a symlink")
-        resolved = value.expanduser().resolve()
+        resolved = value.resolve()
         source_root = Path(__file__).resolve().parents[3]
         if resolved == source_root or resolved.is_relative_to(source_root):
             raise ValueError("Repository storage must be outside the application source tree")

@@ -116,3 +116,34 @@ def test_expired_parser_deadline() -> None:
     with pytest.raises(PatchworkError) as failure:
         parse_python(SourceFile("a.py", "hash", 0, "utf-8", ""), deadline=0, max_symbols=10)
     assert failure.value.code == "ingestion_timeout"
+
+
+def test_import_count_limit() -> None:
+    with pytest.raises(PatchworkError) as failure:
+        parse("import a, b, c, d\n", limit=2)
+    assert failure.value.code == "index_too_large"
+
+
+def test_unicode_line_separators_do_not_shift_source_lines() -> None:
+    result = parse('text = "a\u2028b"\ndef run(): pass\n')
+    assert result.symbols[0].end_line == 2
+    assert result.symbols[1].start_line == 2
+
+
+def test_parser_progress_callback_cancels_work(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    calls = 0
+
+    def clock() -> float:
+        nonlocal calls
+        calls += 1
+        return 0 if calls == 1 else 10
+
+    monkeypatch.setattr("patchwork.intelligence.python.time", SimpleNamespace(monotonic=clock))
+    source = "class A:\n" + "    def method(self): pass\n" * 500
+    file = SourceFile("a.py", "hash", len(source), "utf-8", source)
+    with pytest.raises(PatchworkError) as failure:
+        parse_python(file, deadline=5, max_symbols=1000)
+    assert failure.value.code == "ingestion_timeout"
+    assert calls >= 2

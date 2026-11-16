@@ -1,15 +1,18 @@
 # Patchwork AI
 
 A platform for AI-assisted code investigation and verified repair.
-**Milestone 1 implements the foundation only:** a FastAPI API, local SQLite
-connectivity, and a React dashboard showing real service health. Repository
-import, AI agents, and isolated execution are not implemented yet.
+**Milestones 1–2 are implemented:** a FastAPI API, SQLite indexes, a React health
+dashboard, and deterministic Python repository ingestion and code intelligence.
+Import public GitHub repositories at pinned commits, inspect Tree-sitter symbols
+and imports, and search source without an LLM key. AI agents, patch generation,
+and isolated execution are not implemented yet. Repository operations are API-only;
+the frontend remains the Milestone 1 health dashboard.
 
 ## Requirements
 
 - Python 3.12+ (CI targets 3.12 and 3.14)
 - Node.js 24 or 26 and npm (CI targets Node 24)
-- Git; the commands below use a macOS/Linux shell
+- Git 2.30+ on PATH; the backend targets macOS/Linux (POSIX process control)
 
 ## Install
 
@@ -66,8 +69,9 @@ Both return:
 
 Configuration lives in the ignored root `.env`. `PATCHWORK_DATABASE_PATH`
 defaults to `data/patchwork.db`, relative to the backend working directory.
-Startup creates its parent directory and an empty SQLite database; no domain
-tables exist yet. `PATCHWORK_API_PROXY_TARGET` defaults to
+Startup creates its parent directory and applies transactional SQLite migrations.
+Existing Milestone 1 databases upgrade automatically; back up persistent data
+before upgrades. `PATCHWORK_API_PROXY_TARGET` defaults to
 `http://127.0.0.1:8000`. Restart Vite after changing it. Do not put secrets in
 `VITE_*` variables: Vite exposes those to the browser.
 
@@ -75,6 +79,42 @@ If the dashboard cannot connect, check the backend terminal and direct health
 URL, then the proxy target. An invalid database prevents startup; a database
 that becomes unavailable after startup returns HTTP 503. Ports are fixed so a
 conflict fails visibly instead of silently selecting another port.
+
+## Import and search a repository
+
+With the backend running:
+
+```sh
+curl --fail-with-body http://127.0.0.1:8000/api/repositories \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://github.com/pallets/markupsafe","commit_sha":"4e111271b1494995708a9e878a10829b5e10c7ba"}'
+```
+
+Omit `commit_sha` to resolve the default branch. The response includes the immutable
+commit and repository snapshot `id`. Use that ID in `/docs` to try the files,
+imports, symbols, and search endpoints, or replace `SNAPSHOT_ID` below:
+
+```sh
+curl --fail 'http://127.0.0.1:8000/api/repositories/SNAPSHOT_ID/symbols?name=Markup'
+curl --fail 'http://127.0.0.1:8000/api/repositories/SNAPSHOT_ID/search?q=escape&limit=10'
+```
+
+Imports run synchronously. Repeating a ready URL/SHA returns the existing index.
+Only public HTTPS GitHub URLs are supported; imported code is never checked out
+or executed. Read-only bare snapshots default to
+`~/.local/share/patchwork-ai/repositories`, outside the application tree. An
+existing override directory must be private (mode 0700). `.env.example` documents
+all limits: by default 60 seconds per Git command, 120 seconds per ingestion,
+50 MB fetched/expanded repository, 512 KB per Python file, 10 MB indexed source,
+2000 Python files, 20000 tree entries, 50000 symbols/imports, 100 results, and
+300-character snippets. Limits use bytes, not MiB. Oversized individual Python
+files are skipped; aggregate-limit violations fail the import. See
+[contracts](docs/CONTRACTS.md) for skipped-content, error, and ranking semantics.
+
+Storage limits apply per import, not globally. Failed requests clean up their own
+files; process crashes can leave orphan directories for manual cleanup while the
+API is stopped. No automatic deletion/garbage collection or public hosting is
+provided. Completed snapshots and database data persist across restarts.
 
 ## Checks
 
@@ -97,6 +137,8 @@ The frontend check runs Oxlint, Prettier, Vitest, TypeScript, and a Vite
 production build. Use `npm run test:watch` during development. Format with
 `.venv/bin/ruff format .` in `backend/` and `npm run format` in `frontend/`.
 GitHub Actions runs the same checks on pushes to `master` and pull requests.
+Backend integration tests create small temporary Git repositories; core tests
+never depend on GitHub network access or an LLM key.
 
 To inspect the built frontend, run `npm run preview` in `frontend/` and open
 http://127.0.0.1:4173 with the backend still running. Preview includes the local
@@ -105,7 +147,7 @@ API proxy. A future production server must serve the static build and route
 
 ## Layout and documentation
 
-- `backend/src/patchwork/`: application assembly, configuration, routes, schemas, SQLite
+- `backend/src/patchwork/`: API/schemas, ingestion, Tree-sitter/search, repository storage, migrations
 - `frontend/src/`: API client, health feature, React presentation
 - [Architecture](docs/ARCHITECTURE.md) · [API contracts](docs/CONTRACTS.md)
 - [Decisions](docs/DECISIONS.md) · [Roadmap](docs/ROADMAP.md)

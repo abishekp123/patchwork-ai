@@ -88,11 +88,15 @@ def ingest_repository(
             snapshot = root / f"{repository.id}-{token}.git"
             client.git_dir.rename(snapshot)
             freeze_snapshot(snapshot)
-            result = store.publish(repository.id, token, parsed, skipped, snapshot.name)
+            result = store.publish(
+                repository.id, token, parsed, skipped, snapshot.name, deadline=deadline
+            )
             return result, False
     except Exception as cause:
         if isinstance(cause, PatchworkError):
             error = cause
+        elif isinstance(cause, sqlite3.OperationalError) and time.monotonic() >= deadline:
+            error = PatchworkError("ingestion_timeout", "Index publication timed out.", 504)
         elif isinstance(cause, (OSError, sqlite3.Error)):
             logger.exception("Repository storage failed")
             error = PatchworkError("storage_unavailable", "Repository storage is unavailable.", 503)
@@ -107,4 +111,6 @@ def ingest_repository(
             if token is not None:
                 store.fail(repository.id, token, error)
             error.repository_id = repository.id
+        if error is cause:
+            raise
         raise error from cause
