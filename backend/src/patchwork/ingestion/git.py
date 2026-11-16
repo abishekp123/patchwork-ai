@@ -1,16 +1,55 @@
 """Bounded Git plumbing without checkout, credentials, hooks, or shell interpolation."""
 
+import logging
 import os
 import shutil
 import signal
 import subprocess
 import time
-from contextlib import suppress
 from pathlib import Path
 
 from patchwork.config import Settings
 from patchwork.errors import PatchworkError
 from patchwork.ingestion.validation import normalize_url, validate_sha
+
+logger = logging.getLogger(__name__)
+
+
+def stop_process(process: subprocess.Popen[bytes]) -> None:
+    """Best-effort group termination and bounded reaping, without masking a failure.
+
+    Signal the group even if its leader exited: Git helpers may still be running.
+    A denied group signal falls back to the child PID and retries the group.
+    """
+    group_error: OSError | None = None
+    for _attempt in range(2):
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+            group_error = None
+        except ProcessLookupError:
+            group_error = None  # Already exited between observation and signaling.
+        except OSError as error:
+            group_error = error
+        if group_error is not None or process.poll() is None:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+            except OSError:
+                logger.warning("Could not signal Git child", exc_info=True)
+        try:
+            process.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            continue
+        except OSError:
+            logger.warning("Could not reap Git child", exc_info=True)
+            continue
+        if group_error is None:
+            return
+    if group_error is not None:
+        logger.warning("Could not terminate Git process group: %s", group_error)
+    if process.poll() is None:
+        logger.error("Git child did not exit within the cleanup deadline")
 
 
 def directory_bytes(root: Path) -> int:
@@ -103,11 +142,10 @@ class GitClient:
                     if process.poll() is not None:
                         break
                     time.sleep(0.02)
-            finally:
-                if process.poll() is None:
-                    with suppress(ProcessLookupError):
-                        os.killpg(process.pid, signal.SIGKILL)
-                process.wait()
+            except BaseException:
+                stop_process(process)
+                raise
+            process.wait(timeout=1)  # poll() above has already observed its exit.
         if process.returncode:
             detail = error_path.read_bytes().lower()
             if any(

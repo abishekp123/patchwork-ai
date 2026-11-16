@@ -255,3 +255,108 @@ def test_skipped_binary_does_not_consume_index_limits(
         settings.model_copy(update={"max_python_files": 1, "max_source_bytes": 40}),
     )
     assert len(files) == 1 and skipped["binary_file"] == 1
+
+
+@pytest.mark.parametrize("group_error", [PermissionError, ProcessLookupError, OSError])
+def test_output_limit_survives_group_signal_errors(
+    git_client: GitClient, monkeypatch: pytest.MonkeyPatch, group_error: type[OSError]
+) -> None:
+    import subprocess
+
+    real_popen = subprocess.Popen
+    processes = []
+
+    def tracked_popen(*args, **kwargs):
+        process = real_popen(*args, **kwargs)
+        processes.append(process)
+        return process
+
+    def denied_group(_pid: int, _signal: int) -> None:
+        raise group_error("injected group termination failure")
+
+    executable = git_client.workspace / "large-slow-git"
+    executable.write_text(
+        f"#!{sys.executable}\nimport time\nprint('x' * 10000, flush=True)\ntime.sleep(30)\n"
+    )
+    executable.chmod(0o700)
+    git_client.executable = str(executable)
+    monkeypatch.setattr("patchwork.ingestion.git.subprocess.Popen", tracked_popen)
+    monkeypatch.setattr("patchwork.ingestion.git.os.killpg", denied_group)
+    with pytest.raises(PatchworkError) as failure:
+        git_client.run(["ignored"], max_output=100)
+    assert failure.value.code == "repository_too_large"
+    assert processes[0].returncode is not None  # Direct PID fallback reaped the real child.
+
+
+def test_group_retry_kills_helpers_after_leader_exit(
+    git_client: GitClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import signal
+    import subprocess
+
+    real_killpg = os.killpg
+    calls = []
+
+    def deny_once(pid: int, sig: int) -> None:
+        calls.append(pid)
+        if len(calls) == 1:
+            raise PermissionError("injected platform error")
+        real_killpg(pid, sig)
+
+    helper_pid_file = git_client.workspace / "helper.pid"
+    executable = git_client.workspace / "git-with-helper"
+    executable.write_text(
+        f"#!{sys.executable}\nimport subprocess, sys, time\n"
+        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n"
+        "open('helper.pid', 'w').write(str(child.pid))\n"
+        "print('x' * 10000, flush=True)\ntime.sleep(30)\n"
+    )
+    executable.chmod(0o700)
+    git_client.executable = str(executable)
+    monkeypatch.setattr("patchwork.ingestion.git.os.killpg", deny_once)
+    try:
+        with pytest.raises(PatchworkError) as failure:
+            git_client.run(["ignored"], max_output=100)
+        assert failure.value.status_code == 413
+        assert len(calls) == 2
+        helper_pid = int(helper_pid_file.read_text())
+        # A killed orphan may briefly remain a zombie until the OS reaps it.
+        deadline = time.monotonic() + 2
+        while True:
+            state = subprocess.run(
+                ["ps", "-o", "stat=", "-p", str(helper_pid)], capture_output=True, text=True
+            ).stdout.strip()
+            if not state or state.startswith("Z"):
+                break
+            assert time.monotonic() < deadline, f"Helper still running: {state}"
+            time.sleep(0.02)
+    finally:
+        if helper_pid_file.exists():
+            try:
+                os.kill(int(helper_pid_file.read_text()), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
+def test_cleanup_wait_is_bounded_and_preserves_limit_error(
+    git_client: GitClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import subprocess
+    from unittest.mock import Mock
+
+    process = Mock()
+    process.poll.return_value = None
+    process.wait.side_effect = subprocess.TimeoutExpired("git", 1)
+    process.kill.side_effect = PermissionError("injected PID denial")
+
+    def start(*args, **kwargs):
+        (git_client.workspace / "stdout").write_bytes(b"x" * 101)
+        return process
+
+    monkeypatch.setattr("patchwork.ingestion.git.subprocess.Popen", start)
+    monkeypatch.setattr("patchwork.ingestion.git.os.killpg", Mock(side_effect=PermissionError))
+    with pytest.raises(PatchworkError) as failure:
+        git_client.run(["ignored"], max_output=100)
+    assert failure.value.code == "repository_too_large"
+    assert process.wait.call_count == 2
+    assert all(call.kwargs == {"timeout": 1} for call in process.wait.call_args_list)
