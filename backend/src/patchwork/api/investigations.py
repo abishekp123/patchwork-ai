@@ -1,3 +1,4 @@
+import asyncio
 import os
 from typing import Annotated
 
@@ -17,7 +18,9 @@ from patchwork.schemas.investigations import (
     InvestigationResponse,
     InvestigationStep,
     InvestigationStepPage,
+    ProviderStatus,
 )
+from patchwork.schemas.repositories import Page
 
 ERROR_RESPONSES = {
     code: {"model": ErrorResponse} for code in (404, 409, 413, 422, 500, 502, 503, 504)
@@ -50,15 +53,43 @@ def provider_for(settings: Settings):
 async def create_investigation(
     body: InvestigationRequest,
     settings: Config,
+    request: Request,
 ) -> InvestigationResponse:
     repository = RepositoryStore(settings.database_path).get(body.repository_id)
     if repository.status != "ready":
         raise PatchworkError("index_not_ready", "Repository index is not ready.", 409)
+    provider = provider_for(settings)
     store = Store(settings)
     record = store.create(repository, body.description)
-    provider = provider_for(settings)
-    result = await run_investigation(settings, record, repository, provider)
-    return InvestigationResponse(investigation=result)
+    task = asyncio.create_task(run_investigation(settings, record, repository, provider))
+    tasks: dict[str, asyncio.Task] = request.app.state.investigation_tasks
+    tasks[record.id] = task
+    task.add_done_callback(
+        lambda completed: tasks.pop(record.id, None) if tasks.get(record.id) is completed else None
+    )
+    return InvestigationResponse(investigation=record)
+
+
+@router.get("", response_model=Page[Investigation])
+def list_investigations(
+    settings: Config,
+    repository_id: Annotated[str | None, Query(pattern=r"^[0-9a-f]{64}$")] = None,
+    limit: Limit = 50,
+    offset: Offset = 0,
+) -> Page[Investigation]:
+    items, total = Store(settings).list(repository_id, limit, offset)
+    return Page(items=items, total=total, limit=limit, offset=offset)
+
+
+@router.get("/provider-status", response_model=ProviderStatus)
+def investigation_provider_status(settings: Config) -> ProviderStatus:
+    available = bool(os.environ.get("OPENAI_API_KEY"))
+    return ProviderStatus(
+        available=available,
+        provider="openai",
+        model=settings.investigation_model,
+        reason=None if available else "Configure OPENAI_API_KEY to run an investigation.",
+    )
 
 
 @router.get("/{identifier}", response_model=Investigation)
@@ -90,10 +121,17 @@ def list_investigation_steps(
 
 
 @router.post("/{identifier}/cancel", response_model=Investigation)
-def cancel_investigation(identifier: Identifier, settings: Config) -> Investigation:
+async def cancel_investigation(
+    identifier: Identifier,
+    settings: Config,
+    request: Request,
+) -> Investigation:
     store = Store(settings)
     record = store.get(identifier)
     if record.status in TERMINAL:
         return record
     store.transition(identifier, "CANCELLED", error="cancelled_by_user")
+    task = request.app.state.investigation_tasks.get(identifier)
+    if task is not None:
+        task.cancel()
     return store.get(identifier)

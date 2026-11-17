@@ -52,6 +52,17 @@ class FileMetadata(BaseModel):
     has_errors: bool
 
 
+class FileContent(BaseModel):
+    repository_id: str
+    commit_sha: str
+    path: str
+    content_hash: str
+    start_line: int
+    end_line: int
+    total_lines: int
+    content: str
+
+
 class IndexedSymbol(Symbol):
     id: int
 

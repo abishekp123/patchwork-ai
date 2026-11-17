@@ -6,8 +6,10 @@ import sqlite3
 from patchwork.config import Settings
 from patchwork.database import connect_database
 from patchwork.errors import PatchworkError
+from patchwork.ingestion.validation import validate_path
 from patchwork.repositories.models import Repository
 from patchwork.schemas.repositories import (
+    FileContent,
     FileMetadata,
     IndexedImport,
     IndexedSymbol,
@@ -78,6 +80,41 @@ def files(settings: Settings, identifier: str, limit: int, offset: int) -> Page[
         total=total,
         limit=limit,
         offset=offset,
+    )
+
+
+def file_content(
+    settings: Settings,
+    repository: Repository,
+    path: str,
+    start_line: int,
+    end_line: int | None,
+) -> FileContent:
+    safe_path = validate_path(path)
+    with connect_database(settings.database_path) as connection:
+        row = connection.execute(
+            """SELECT content_hash, source, line_count FROM files
+            WHERE repository_id = ? AND path = ?""",
+            (repository.id, safe_path),
+        ).fetchone()
+    if row is None:
+        raise PatchworkError("file_not_found", "File is not present in this snapshot.", 404)
+    if end_line is None:
+        end_line = min(row["line_count"], start_line + 199)
+    if start_line > row["line_count"] or end_line < start_line or end_line - start_line >= 200:
+        raise PatchworkError("invalid_range", "Request a valid source range of at most 200 lines.")
+    lines = row["source"].split("\n")
+    content = "\n".join(lines[start_line - 1 : end_line])
+    assert repository.commit_sha is not None
+    return FileContent(
+        repository_id=repository.id,
+        commit_sha=repository.commit_sha,
+        path=safe_path,
+        content_hash=row["content_hash"],
+        start_line=start_line,
+        end_line=end_line,
+        total_lines=row["line_count"],
+        content=content,
     )
 
 

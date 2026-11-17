@@ -57,6 +57,32 @@ class Store:
         data["report"] = json.loads(data["report"]) if data["report"] else None
         return Investigation.model_validate(data)
 
+    def list(self, repository_id=None, limit=50, offset=0):
+        with connect_database(self.settings.database_path) as db, db:
+            now = timestamp()
+            db.execute(
+                """UPDATE investigations SET status='FAILED', error_code='interrupted',
+                       completed_at=?, updated_at=? WHERE expires < ?
+                       AND status NOT IN ('COMPLETED','FAILED','CANCELLED','BUDGET_EXHAUSTED')""",
+                (now, now, time.time()),
+            )
+            where = "WHERE repository_id=?" if repository_id else ""
+            parameters = (repository_id,) if repository_id else ()
+            total = db.execute(
+                f"SELECT count(*) FROM investigations {where}", parameters
+            ).fetchone()[0]
+            rows = db.execute(
+                f"""SELECT * FROM investigations {where}
+                ORDER BY created_at DESC, id LIMIT ? OFFSET ?""",
+                (*parameters, limit, offset),
+            ).fetchall()
+        items = []
+        for row in rows:
+            data = dict(row)
+            data["report"] = json.loads(data["report"]) if data["report"] else None
+            items.append(Investigation.model_validate(data))
+        return items, total
+
     def transition(self, identifier, status, report=None, error=None):
         with connect_database(self.settings.database_path) as db, db:
             db.execute("BEGIN IMMEDIATE")

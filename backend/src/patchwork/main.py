@@ -27,6 +27,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="Patchwork AI", version=__version__, lifespan=lifespan)
     app.state.settings = resolved_settings
     app.state.verification_tasks = {}
+    app.state.investigation_tasks = {}
     app.include_router(health_router)
     app.include_router(investigations_router, prefix="/api")
     app.include_router(patches_router, prefix="/api")

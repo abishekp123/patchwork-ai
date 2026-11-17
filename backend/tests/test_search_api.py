@@ -51,6 +51,10 @@ def test_api_import_idempotency_metadata_and_proxy_alias(
     assert files["items"][0]["path"] == "main.py"
     assert len(files["items"][0]["content_hash"]) == 64
     assert "source" not in files["items"][0]
+    source = api.get(f"/api/repositories/{identifier}/files/main.py/content")
+    assert source.status_code == 200
+    assert source.json()["content"] == "def original():\n    return 1"
+    assert source.json()["commit_sha"] == local_repo[1]
     assert api.get("/health").json()["status"] == "ok"
 
 

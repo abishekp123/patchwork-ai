@@ -11,6 +11,7 @@ from patchwork.repositories.service import ingest_repository
 from patchwork.repositories.store import RepositoryStore
 from patchwork.schemas.errors import ErrorResponse
 from patchwork.schemas.repositories import (
+    FileContent,
     FileMetadata,
     ImportRequest,
     ImportResponse,
@@ -109,6 +110,19 @@ def list_files(
 ) -> Page[FileMetadata]:
     ready_repository(identifier, settings, commit_sha)
     return retrieval.files(settings, identifier, min(limit, settings.max_results), offset)
+
+
+@router.get("/{identifier}/files/{path:path}/content", response_model=FileContent)
+def get_file_content(
+    identifier: Identifier,
+    path: Annotated[str, Path(min_length=1, max_length=4096)],
+    settings: Config,
+    commit_sha: Commit = None,
+    start_line: Annotated[int, Query(ge=1)] = 1,
+    end_line: Annotated[int | None, Query(ge=1)] = None,
+) -> FileContent:
+    repository = ready_repository(identifier, settings, commit_sha)
+    return retrieval.file_content(settings, repository, path, start_line, end_line)
 
 
 @router.get("/{identifier}/imports", response_model=Page[IndexedImport])

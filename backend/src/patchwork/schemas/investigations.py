@@ -23,3 +23,10 @@ class InvestigationStepPage(Page[InvestigationStep]):
 
 class InvestigationResponse(BaseModel):
     investigation: Investigation
+
+
+class ProviderStatus(BaseModel):
+    available: bool
+    provider: str
+    model: str
+    reason: str | None = None

@@ -137,7 +137,7 @@ class Tools:
                 raise ValueError("Evidence no longer valid")
         return {
             **draft.model_dump(),
-            "evidence": [self.evidence[key] for key in sorted(refs)],
+            "evidence": [{"evidence_id": key, **self.evidence[key]} for key in sorted(refs)],
             "outcome": "hypotheses" if refs and draft.hypotheses else "insufficient_evidence",
             "verification": "Source locations validated; model interpretations are unverified.",
         }
