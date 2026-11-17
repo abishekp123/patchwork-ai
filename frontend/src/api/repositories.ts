@@ -71,9 +71,10 @@ export async function importRepository(url: string): Promise<RepositoryRecord> {
 export async function listRepositoryFiles(
   repositoryId: string,
   signal?: AbortSignal,
+  offset = 0,
 ): Promise<FileRecord[]> {
   const page = await requestJSON<Page<FileRecord>>(
-    `/api/repositories/${repositoryId}/files?limit=200`,
+    `/api/repositories/${repositoryId}/files?limit=200&offset=${offset}`,
     { signal },
   )
   return page.items

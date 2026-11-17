@@ -39,6 +39,7 @@ def test_provider_contract(monkeypatch):
 
     def handler(request):
         body = json.loads(request.content)
+        assert request.headers["Authorization"] == "Bearer secret"
         assert body["store"] is False and body["parallel_tool_calls"] is False
         assert all(tool["strict"] for tool in body["tools"])
         return httpx.Response(
@@ -56,6 +57,43 @@ def test_provider_contract(monkeypatch):
         OpenAIProvider("test", 1, httpx.MockTransport(handler)).decide("{}", definitions(), 100)
     )
     assert decision.call.name == "search_code" and decision.input_tokens == 10
+
+
+def test_provider_uses_patch_specific_instructions(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "patch-test-key")
+    tools = [
+        {
+            "type": "function",
+            "name": "generate_patch",
+            "strict": True,
+            "parameters": {"type": "object"},
+        }
+    ]
+
+    def handler(request):
+        body = json.loads(request.content)
+        assert request.headers["Authorization"] == "Bearer patch-test-key"
+        assert "structured patch proposal" in body["instructions"]
+        assert body["tools"][0]["strict"] is True
+        return httpx.Response(
+            200,
+            json={
+                "status": "completed",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "generate_patch",
+                        "arguments": '{"title":"Fix","summary":"A safe fix","changes":[]}',
+                    }
+                ],
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            },
+        )
+
+    decision = asyncio.run(
+        OpenAIProvider("test", 1, httpx.MockTransport(handler)).decide("source context", tools, 100)
+    )
+    assert decision.call.name == "generate_patch"
 
 
 def test_invalid_provider(monkeypatch):

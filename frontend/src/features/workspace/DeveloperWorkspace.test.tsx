@@ -119,6 +119,26 @@ describe('DeveloperWorkspace', () => {
               report: null,
             },
           })
+        if (url === '/api/patches' && init?.method === 'POST')
+          return response({
+            patch: {
+              id: 'patch-1',
+              repository_id: repositoryId,
+              commit_sha: repository.commit_sha,
+              investigation_id: investigationId,
+              status: 'pending_review',
+              title: 'Validated repair draft',
+              summary: 'A snapshot-validated change.',
+              diff: '--- a/src/bug.py\n+++ b/src/bug.py',
+              evidence_ids: [evidenceId],
+              created_at: '2026-01-01T00:00:02Z',
+              updated_at: '2026-01-01T00:00:02Z',
+              reviewed_at: null,
+              reviewer: null,
+              decision_reason: null,
+              error_code: null,
+            },
+          })
         if (url.endsWith(`/investigations/${investigationId}`))
           return response(completedInvestigation)
         throw new Error(`Unexpected API request: ${url}`)
@@ -139,6 +159,15 @@ describe('DeveloperWorkspace', () => {
     expect(
       await screen.findByText('The function returns the wrong value.'),
     ).toBeInTheDocument()
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Propose evidence-backed patch' }),
+    )
+    expect(
+      await screen.findByText('Validated repair draft'),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('link', { name: 'Open patch review' }),
+    ).toHaveAttribute('href', '#patch-review')
     const citation = screen.getByRole('button', {
       name: `${file.path}:1–2`,
     })

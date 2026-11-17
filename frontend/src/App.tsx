@@ -1,8 +1,11 @@
+import { useState } from 'react'
+
 import { HealthPanel } from './features/health/HealthPanel'
 import { PatchReviewPanel } from './features/patches/PatchReviewPanel'
 import { DeveloperWorkspace } from './features/workspace/DeveloperWorkspace'
 
 export default function App() {
+  const [patchRefreshSignal, setPatchRefreshSignal] = useState(0)
   return (
     <div className="mx-auto flex min-h-screen max-w-[1440px] flex-col px-4 sm:px-8 xl:px-10">
       <header className="flex flex-wrap items-center justify-between gap-4 border-b border-stone-200 py-5">
@@ -60,10 +63,14 @@ export default function App() {
           <HealthPanel />
         </div>
         <div id="workspace">
-          <DeveloperWorkspace />
+          <DeveloperWorkspace
+            onPatchCreated={() =>
+              setPatchRefreshSignal((current) => current + 1)
+            }
+          />
         </div>
         <div id="patch-review" className="mt-8 scroll-mt-6">
-          <PatchReviewPanel />
+          <PatchReviewPanel refreshSignal={patchRefreshSignal} />
         </div>
       </main>
       <footer className="flex flex-wrap justify-between gap-2 border-t border-stone-200 py-5 font-mono text-[10px] tracking-wide text-stone-500">

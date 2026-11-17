@@ -13,6 +13,7 @@ import {
   type InvestigationStep,
   type ProviderStatus,
 } from '../../api/investigations'
+import { createPatch, type PatchRecord } from '../../api/patches'
 import {
   getRepositoryFile,
   importRepository,
@@ -50,10 +51,15 @@ function statusStyle(status: InvestigationStatus): string {
   return 'bg-amber-100 text-amber-800'
 }
 
-export function DeveloperWorkspace() {
+export function DeveloperWorkspace({
+  onPatchCreated,
+}: {
+  onPatchCreated?: () => void
+}) {
   const [repositories, setRepositories] = useState<RepositoryRecord[]>([])
   const [selectedRepositoryId, setSelectedRepositoryId] = useState('')
   const [files, setFiles] = useState<FileRecord[]>([])
+  const [fileOffset, setFileOffset] = useState(0)
   const [selectedPath, setSelectedPath] = useState('')
   const [sourceStart, setSourceStart] = useState(1)
   const [source, setSource] = useState<FileContent | null>(null)
@@ -82,6 +88,9 @@ export function DeveloperWorkspace() {
   const [investigationError, setInvestigationError] = useState<string | null>(
     null,
   )
+  const [creatingPatch, setCreatingPatch] = useState(false)
+  const [createdPatch, setCreatedPatch] = useState<PatchRecord | null>(null)
+  const [patchError, setPatchError] = useState<string | null>(null)
 
   const selectedRepository = repositories.find(
     (item) => item.id === selectedRepositoryId,
@@ -163,7 +172,11 @@ export function DeveloperWorkspace() {
     async function loadRepositoryWorkspace() {
       setWorkspaceError(null)
       const [fileResult, investigationResult] = await Promise.allSettled([
-        listRepositoryFiles(selectedRepositoryId, controller.signal),
+        listRepositoryFiles(
+          selectedRepositoryId,
+          controller.signal,
+          fileOffset,
+        ),
         listInvestigations(selectedRepositoryId),
       ])
       if (!active) return
@@ -205,7 +218,7 @@ export function DeveloperWorkspace() {
       active = false
       controller.abort()
     }
-  }, [selectedRepositoryId])
+  }, [selectedRepositoryId, fileOffset])
 
   useEffect(() => {
     if (!selectedRepositoryId || !selectedPath) {
@@ -288,6 +301,7 @@ export function DeveloperWorkspace() {
         ...current.filter((item) => item.id !== record.id),
       ])
       setSelectedRepositoryId(record.id)
+      setFileOffset(0)
       setRepositoryUrl('')
     } catch (issue) {
       setImportError(
@@ -392,7 +406,46 @@ export function DeveloperWorkspace() {
     }
   }
 
+  async function submitPatch() {
+    if (
+      !currentInvestigation ||
+      currentInvestigation.status !== 'COMPLETED' ||
+      !report?.summary ||
+      citedEvidenceIds.length === 0 ||
+      creatingPatch
+    ) {
+      return
+    }
+    setCreatingPatch(true)
+    setPatchError(null)
+    try {
+      const patch = await createPatch({
+        repository_id: currentInvestigation.repository_id,
+        investigation_id: currentInvestigation.id,
+        description: report.summary,
+        evidence_ids: citedEvidenceIds,
+      })
+      setCreatedPatch(patch)
+      onPatchCreated?.()
+    } catch (issue) {
+      setPatchError(
+        issue instanceof Error
+          ? issue.message
+          : 'Could not generate an evidence-backed patch.',
+      )
+    } finally {
+      setCreatingPatch(false)
+    }
+  }
+
   const report = currentInvestigation?.report
+  const citedEvidenceIds = [
+    ...new Set(
+      [...(report?.facts ?? []), ...(report?.hypotheses ?? [])].flatMap(
+        (finding) => finding.evidence_ids,
+      ),
+    ),
+  ].slice(0, 20)
   const activeInvestigation =
     currentInvestigation && !terminalStatuses.has(currentInvestigation.status)
 
@@ -443,6 +496,7 @@ export function DeveloperWorkspace() {
                 value={selectedRepositoryId}
                 onChange={(event) => {
                   setSourceError(null)
+                  setFileOffset(0)
                   setSelectedRepositoryId(event.currentTarget.value)
                 }}
                 disabled={!repositories.length}
@@ -549,6 +603,36 @@ export function DeveloperWorkspace() {
                       {file.path}
                     </button>
                   ))}
+                </div>
+                <div className="flex items-center justify-between border-t border-stone-100 px-3 py-2 text-[10px] text-stone-500">
+                  <button
+                    type="button"
+                    aria-label="Previous file page"
+                    disabled={fileOffset === 0}
+                    onClick={() =>
+                      setFileOffset((current) => Math.max(0, current - 200))
+                    }
+                    className="rounded border border-stone-300 px-2 py-1 disabled:opacity-40"
+                  >
+                    Previous
+                  </button>
+                  <span>
+                    {files.length
+                      ? `${fileOffset + 1}–${fileOffset + files.length} / ${selectedRepository?.file_count ?? files.length}`
+                      : '0 files'}
+                  </span>
+                  <button
+                    type="button"
+                    aria-label="Next file page"
+                    disabled={
+                      fileOffset + files.length >=
+                      (selectedRepository?.file_count ?? 0)
+                    }
+                    onClick={() => setFileOffset((current) => current + 200)}
+                    className="rounded border border-stone-300 px-2 py-1 disabled:opacity-40"
+                  >
+                    Next
+                  </button>
                 </div>
               </aside>
 
@@ -766,7 +850,7 @@ export function DeveloperWorkspace() {
                 onChange={(event) =>
                   setSelectedInvestigationId(event.currentTarget.value)
                 }
-                disabled={!investigations.length}
+                disabled={!visibleInvestigations.length}
                 className="max-w-40 rounded-lg border border-stone-300 bg-white px-2 py-1.5 text-xs"
               >
                 {!visibleInvestigations.length && (
@@ -827,6 +911,53 @@ export function DeveloperWorkspace() {
                     </p>
                   </div>
                 )}
+                {currentInvestigation.status === 'COMPLETED' && (
+                  <div className="space-y-2 border-t border-stone-100 pt-4">
+                    <button
+                      type="button"
+                      onClick={() => void submitPatch()}
+                      disabled={
+                        creatingPatch ||
+                        citedEvidenceIds.length === 0 ||
+                        !report?.summary
+                      }
+                      className="w-full rounded-lg bg-stone-900 px-3 py-2.5 text-sm font-medium text-white hover:bg-stone-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {creatingPatch
+                        ? 'Generating validated patch…'
+                        : 'Propose evidence-backed patch'}
+                    </button>
+                    {citedEvidenceIds.length === 0 && (
+                      <p className="text-xs text-stone-500">
+                        This report has no source-cited findings to attach to a
+                        patch.
+                      </p>
+                    )}
+                    {patchError && (
+                      <p role="alert" className="text-sm text-rose-700">
+                        {patchError}
+                      </p>
+                    )}
+                    {createdPatch?.investigation_id ===
+                      currentInvestigation.id && (
+                      <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+                        <p className="text-sm font-medium text-emerald-900">
+                          {createdPatch.title}
+                        </p>
+                        <p className="mt-1 text-xs text-emerald-800">
+                          {createdPatch.status.replace('_', ' ')} ·{' '}
+                          {createdPatch.evidence_ids.length} evidence references
+                        </p>
+                        <a
+                          href="#patch-review"
+                          className="mt-2 inline-block text-xs font-medium text-emerald-900 underline underline-offset-2"
+                        >
+                          Open patch review
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                )}
                 {report?.facts?.map((finding, index) => (
                   <FindingCard
                     key={`fact-${index}`}
@@ -849,6 +980,34 @@ export function DeveloperWorkspace() {
                   <p className="border-t border-stone-100 pt-3 text-xs leading-5 text-stone-500">
                     Limitations: {report.limitations.join(' ')}
                   </p>
+                )}
+                {report?.next_steps && report.next_steps.length > 0 && (
+                  <div>
+                    <h3 className="text-xs font-semibold uppercase tracking-wider text-stone-500">
+                      Next steps
+                    </h3>
+                    <ul className="mt-2 list-inside list-disc space-y-1 text-xs leading-5 text-stone-700">
+                      {report.next_steps.map((step, index) => (
+                        <li key={`${index}:${step}`}>{step}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {investigationSteps.length > 0 && (
+                  <details className="border-t border-stone-100 pt-3">
+                    <summary className="cursor-pointer text-xs font-medium text-stone-600">
+                      Recent activity ({investigationSteps.length} steps)
+                    </summary>
+                    <pre className="mt-2 max-h-40 overflow-auto rounded bg-stone-100 p-2 text-[10px] leading-4 text-stone-600 whitespace-pre-wrap">
+                      {investigationSteps
+                        .slice(-5)
+                        .map(
+                          (step) =>
+                            `#${step.sequence} ${JSON.stringify(step.data).slice(0, 1000)}`,
+                        )
+                        .join('\n')}
+                    </pre>
+                  </details>
                 )}
               </div>
             ) : (

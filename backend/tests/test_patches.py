@@ -7,8 +7,10 @@ from fastapi.testclient import TestClient
 
 from patchwork.config import Settings
 from patchwork.database import initialize_database
+from patchwork.errors import PatchworkError
 from patchwork.ingestion.discovery import SourceFile
 from patchwork.intelligence.models import Import, ParsedFile, Symbol
+from patchwork.investigations.store import Store as InvestigationStore
 from patchwork.main import create_app
 from patchwork.patches.engine import (
     PatchChange,
@@ -67,7 +69,11 @@ def _ready_repository(settings: Settings):
 
 
 class FakePatchProvider:
+    def __init__(self):
+        self.payload = None
+
     async def generate_patch(self, payload, repository):
+        self.payload = payload
         source = "def bug():\n    return 1\n"
         evidence = _evidence_id(repository.id, repository.commit_sha, "example.py", 1, 2)
         return {
@@ -115,6 +121,13 @@ def test_patch_generator_validates_and_persists_a_proposal(settings: Settings):
     assert record.status == "pending_review"
     approved = store.transition(record.id, "approved", reviewer="human", reason="Looks safe.")
     assert approved.status == "approved"
+
+
+def test_patch_generator_does_not_substitute_a_generated_fallback(settings: Settings):
+    repository = _ready_repository(settings)
+    with pytest.raises(PatchworkError) as error:
+        asyncio.run(PatchGenerator(settings, repository).generate("Repair the bug."))
+    assert error.value.code == "provider_credentials_missing"
 
 
 def test_patch_validator_rejects_fabricated_and_cross_snapshot_evidence(
@@ -265,9 +278,9 @@ def test_patch_generator_handles_malformed_provider_output(settings: Settings):
             raise TimeoutError("slow")
 
     generator = PatchGenerator(settings, repository, MalformedProvider())
-    proposal = asyncio.run(generator.generate("Make a safe fallback patch.", evidence_ids=[]))
-    assert proposal.title == "Apply a transparent safety patch"
-    assert proposal.changes[0].path == "example.py"
+    with pytest.raises(PatchworkError) as timeout:
+        asyncio.run(generator.generate("Make a safe fallback patch.", evidence_ids=[]))
+    assert timeout.value.code == "patch_provider_invalid_response"
 
     class BadProvider:
         async def decide(self, context, tools, max_output):
@@ -280,13 +293,19 @@ def test_patch_generator_handles_malformed_provider_output(settings: Settings):
 
             return BadDecision()
 
-    fallback = PatchGenerator(settings, repository, BadProvider())
-    repaired = asyncio.run(fallback.generate("Still safe with malformed model output."))
-    assert repaired.title == "Apply a transparent safety patch"
+    malformed = PatchGenerator(settings, repository, BadProvider())
+    with pytest.raises(PatchworkError) as invalid:
+        asyncio.run(malformed.generate("Still safe with malformed model output."))
+    assert invalid.value.code == "patch_provider_invalid_response"
 
 
-def test_patch_api_accepts_a_review_decision(settings: Settings):
+def test_patch_api_accepts_a_review_decision(
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+):
     repository = _ready_repository(settings)
+    provider = FakePatchProvider()
+    monkeypatch.setattr("patchwork.api.patches.provider_for", lambda _settings: provider)
     app = create_app(settings)
     client = TestClient(app)
 
@@ -302,6 +321,7 @@ def test_patch_api_accepts_a_review_decision(settings: Settings):
     payload = response.json()
     patch_id = payload["patch"]["id"]
     assert payload["patch"]["status"] == "pending_review"
+    assert provider.payload["source_files"][0]["source"] == "def bug():\n    return 1\n"
 
     approved = client.post(
         f"/api/patches/{patch_id}/approve",
@@ -323,6 +343,112 @@ def test_patch_api_accepts_a_review_decision(settings: Settings):
         json={"decision": "reject", "reviewer": "human3", "reason": "Already resolved."},
     )
     assert reject.status_code == 409, reject.text
+
+
+def test_patch_api_requires_provider_credentials(settings: Settings, monkeypatch):
+    repository = _ready_repository(settings)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    client = TestClient(create_app(settings))
+    response = client.post(
+        "/api/patches",
+        json={
+            "repository_id": repository.id,
+            "description": "Propose a repair.",
+        },
+    )
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "provider_credentials_missing"
+
+
+def test_patch_api_rejects_cross_repository_investigations(settings: Settings):
+    repository = _ready_repository(settings)
+    other, token = RepositoryStore(settings.database_path).claim(
+        "https://github.com/example/other-project",
+        "b" * 40,
+        10,
+    )
+    assert token is not None
+    investigation = InvestigationStore(settings).create(other, "Inspect another snapshot.")
+    client = TestClient(create_app(settings))
+    response = client.post(
+        "/api/patches",
+        json={
+            "repository_id": repository.id,
+            "investigation_id": investigation.id,
+            "description": "Use another repository's evidence.",
+            "evidence_ids": [],
+        },
+    )
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "investigation_snapshot_mismatch"
+
+
+def test_patch_api_requires_completed_snapshot_matched_citations(
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    repository = _ready_repository(settings)
+    evidence_id = _evidence_id(repository.id, repository.commit_sha, "example.py", 1, 2)
+    investigation_store = InvestigationStore(settings)
+    investigation = investigation_store.create(repository, "Inspect the bug.")
+    for status in (
+        "CONTEXT_RETRIEVAL",
+        "INVESTIGATING",
+        "EVIDENCE_REVIEW",
+        "COMPLETED",
+    ):
+        report = (
+            {
+                "summary": "The inspected function returns a wrong value.",
+                "facts": [
+                    {
+                        "statement": "The function returns 1.",
+                        "evidence_ids": [evidence_id],
+                    }
+                ],
+                "hypotheses": [],
+                "evidence": [
+                    {
+                        "evidence_id": evidence_id,
+                        "repository_id": repository.id,
+                        "commit_sha": repository.commit_sha,
+                        "path": "example.py",
+                        "start_line": 1,
+                        "end_line": 2,
+                    }
+                ],
+            }
+            if status == "COMPLETED"
+            else None
+        )
+        investigation_store.transition(investigation.id, status, report=report)
+    provider = FakePatchProvider()
+    monkeypatch.setattr("patchwork.api.patches.provider_for", lambda _settings: provider)
+    client = TestClient(create_app(settings))
+    response = client.post(
+        "/api/patches",
+        json={
+            "repository_id": repository.id,
+            "investigation_id": investigation.id,
+            "description": "Apply the evidence-backed repair.",
+            "evidence_ids": [evidence_id],
+        },
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["patch"]["investigation_id"] == investigation.id
+    assert response.json()["patch"]["evidence_ids"] == [evidence_id]
+
+    invalid_evidence = client.post(
+        "/api/patches",
+        json={
+            "repository_id": repository.id,
+            "investigation_id": investigation.id,
+            "description": "Try fabricated evidence.",
+            "evidence_ids": ["f" * 16],
+        },
+    )
+    assert invalid_evidence.status_code == 422
+    assert invalid_evidence.json()["error"]["code"] == "invalid_investigation_evidence"
 
 
 def test_fake_provider_integration_workflow(settings: Settings):

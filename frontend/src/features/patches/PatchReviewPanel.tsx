@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 
 import { decidePatch, listPatches, type PatchRecord } from '../../api/patches'
 import {
+  cancelVerification,
   createPatchVerification,
   getSandboxStatus,
   listPatchVerifications,
@@ -20,11 +21,16 @@ function summaryLabel(
   return `exit ${value.exit_code}`
 }
 
-export function PatchReviewPanel() {
+export function PatchReviewPanel({
+  refreshSignal = 0,
+}: {
+  refreshSignal?: number
+}) {
   const [patches, setPatches] = useState<PatchRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [sandboxStatus, setSandboxStatus] = useState<SandboxStatus | null>(null)
+  const [sandboxError, setSandboxError] = useState<string | null>(null)
   const [verificationByPatch, setVerificationByPatch] = useState<
     Record<string, VerificationRecord[]>
   >({})
@@ -32,6 +38,7 @@ export function PatchReviewPanel() {
     Record<string, VerificationResult | null>
   >({})
   const [inFlightId, setInFlightId] = useState<string | null>(null)
+  const [pollingPatchIds, setPollingPatchIds] = useState<string[]>([])
 
   const refreshVerifications = useCallback(async (patchId: string) => {
     try {
@@ -42,30 +49,39 @@ export function PatchReviewPanel() {
         ...current,
         [patchId]: latest ? (latest.comparison ?? null) : null,
       }))
-    } catch {
-      // Verification details are optional; keep the queue view stable.
+      return latest
+    } catch (issue) {
+      setError(
+        issue instanceof Error
+          ? issue.message
+          : 'Unable to refresh verification status.',
+      )
+      return null
     }
   }, [])
 
   const refresh = useCallback(async () => {
     setLoading(true)
     try {
-      const [next, nextSandbox] = await Promise.all([
+      const [next, sandboxResult] = await Promise.allSettled([
         listPatches(),
-        getSandboxStatus().catch(
-          () =>
-            ({
-              available: false,
-              mode: 'fake',
-              reason: 'Sandbox status unavailable.',
-            }) satisfies SandboxStatus,
-        ),
+        getSandboxStatus(),
       ])
-      setPatches(next)
+      if (next.status === 'rejected') throw next.reason
+      const nextSandbox =
+        sandboxResult.status === 'fulfilled' ? sandboxResult.value : null
+      setSandboxError(
+        sandboxResult.status === 'rejected'
+          ? sandboxResult.reason instanceof Error
+            ? sandboxResult.reason.message
+            : 'Sandbox status is unavailable.'
+          : null,
+      )
+      setPatches(next.value)
       setSandboxStatus(nextSandbox)
       setError(null)
       await Promise.all(
-        next
+        next.value
           .filter((patch) => patch.status === 'approved')
           .map((patch) => refreshVerifications(patch.id)),
       )
@@ -82,19 +98,38 @@ export function PatchReviewPanel() {
     window.queueMicrotask(() => {
       void refresh()
     })
-  }, [refresh])
+  }, [refresh, refreshSignal])
 
   useEffect(() => {
-    if (!inFlightId) {
+    if (pollingPatchIds.length === 0) {
       return undefined
     }
+    let active = true
     const timer = window.setInterval(() => {
-      void refreshVerifications(inFlightId)
-    }, 2000)
-    return () => window.clearInterval(timer)
-  }, [inFlightId, refreshVerifications])
+      void Promise.all(pollingPatchIds.map(refreshVerifications)).then(
+        (records) => {
+          if (!active) return
+          const stillRunning = pollingPatchIds.filter((_, index) => {
+            const record = records[index]
+            return (
+              record !== null &&
+              record !== undefined &&
+              !['COMPLETED', 'FAILED', 'CANCELLED'].includes(record.status)
+            )
+          })
+          setPollingPatchIds(stillRunning)
+        },
+      )
+    }, 1500)
+    return () => {
+      active = false
+      window.clearInterval(timer)
+    }
+  }, [pollingPatchIds, refreshVerifications])
 
   const review = async (id: string, decision: 'approve' | 'reject') => {
+    if (inFlightId) return
+    setInFlightId(id)
     try {
       const next = await decidePatch(id, {
         decision,
@@ -112,31 +147,74 @@ export function PatchReviewPanel() {
       }
     } catch (issue) {
       setError(issue instanceof Error ? issue.message : 'Patch review failed.')
+    } finally {
+      setInFlightId(null)
     }
   }
 
   const verify = async (patch: PatchRecord) => {
-    if (patch.status !== 'approved') {
+    if (
+      patch.status !== 'approved' ||
+      sandboxStatus?.mode !== 'docker' ||
+      !sandboxStatus.available ||
+      inFlightId
+    ) {
       return
     }
     setInFlightId(patch.id)
+    setPollingPatchIds((current) =>
+      current.includes(patch.id) ? current : [...current, patch.id],
+    )
     try {
       const record = await createPatchVerification(patch.id, {
-        sandbox_mode:
-          sandboxStatus?.mode === 'docker' && sandboxStatus.available
-            ? 'docker'
-            : 'fake',
+        sandbox_mode: 'docker',
       })
       setVerificationByPatch((current) => ({
         ...current,
-        [patch.id]: [record],
+        [patch.id]: [record, ...(current[patch.id] ?? [])],
       }))
-      await refreshVerifications(patch.id)
+      const latest = await refreshVerifications(patch.id)
+      if (
+        latest &&
+        ['COMPLETED', 'FAILED', 'CANCELLED'].includes(latest.status)
+      ) {
+        setPollingPatchIds((current) =>
+          current.filter((identifier) => identifier !== patch.id),
+        )
+      }
     } catch (issue) {
+      setPollingPatchIds((current) =>
+        current.filter((identifier) => identifier !== patch.id),
+      )
       setError(
         issue instanceof Error
           ? issue.message
           : 'Verification failed to start.',
+      )
+    } finally {
+      setInFlightId(null)
+    }
+  }
+
+  const cancel = async (id: string) => {
+    if (inFlightId) return
+    setInFlightId(id)
+    try {
+      await cancelVerification(id)
+      const patchId = Object.entries(verificationByPatch).find(([, records]) =>
+        records.some((record) => record.id === id),
+      )?.[0]
+      if (patchId) await refreshVerifications(patchId)
+      if (patchId) {
+        setPollingPatchIds((current) =>
+          current.filter((identifier) => identifier !== patchId),
+        )
+      }
+    } catch (issue) {
+      setError(
+        issue instanceof Error
+          ? issue.message
+          : 'Verification cancellation failed.',
       )
     } finally {
       setInFlightId(null)
@@ -150,12 +228,18 @@ export function PatchReviewPanel() {
           <h2 className="text-lg font-semibold tracking-tight">
             Patch review queue
           </h2>
-          {sandboxStatus && (
-            <p className="mt-1 text-xs text-stone-500">
-              Sandbox: {sandboxStatus.available ? 'available' : 'unavailable'}
-              {sandboxStatus.reason ? ` · ${sandboxStatus.reason}` : ''}
-            </p>
-          )}
+          <p className="mt-1 text-xs text-stone-500">
+            {sandboxStatus?.mode === 'docker'
+              ? `Docker sandbox: ${sandboxStatus.available ? 'available' : 'unavailable'}`
+              : sandboxStatus?.mode === 'fake'
+                ? 'Fake adapter is test-only; Docker verification is disabled.'
+                : 'Sandbox status unavailable'}
+            {sandboxStatus?.reason
+              ? ` · ${sandboxStatus.reason}`
+              : sandboxError
+                ? ` · ${sandboxError}`
+                : ''}
+          </p>
         </div>
         <button
           type="button"
@@ -169,14 +253,17 @@ export function PatchReviewPanel() {
         {loading && (
           <p className="text-sm text-stone-600">Loading patch proposals…</p>
         )}
-        {!loading && error && <p className="text-sm text-rose-600">{error}</p>}
+        {!loading && error && (
+          <p role="alert" className="text-sm text-rose-600">
+            {error}
+          </p>
+        )}
         {!loading && !error && patches.length === 0 && (
           <p className="text-sm text-stone-600">
             No patch proposals are available yet.
           </p>
         )}
         {!loading &&
-          !error &&
           patches.length > 0 &&
           patches.map((patch) => {
             const verificationRecords = verificationByPatch[patch.id] ?? []
@@ -203,26 +290,41 @@ export function PatchReviewPanel() {
                       <button
                         type="button"
                         onClick={() => void verify(patch)}
-                        disabled={inFlightId === patch.id}
+                        disabled={
+                          inFlightId === patch.id ||
+                          sandboxStatus?.mode !== 'docker' ||
+                          !sandboxStatus.available
+                        }
+                        title={
+                          sandboxStatus?.mode === 'fake'
+                            ? 'Docker sandbox is required for verification.'
+                            : (sandboxStatus?.reason ?? undefined)
+                        }
                         className="rounded-lg bg-violet-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {inFlightId === patch.id ? 'Verifying…' : 'Verify'}
                       </button>
                     )}
-                    <button
-                      type="button"
-                      onClick={() => void review(patch.id, 'approve')}
-                      className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-emerald-500"
-                    >
-                      Approve
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void review(patch.id, 'reject')}
-                      className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm font-medium text-stone-700 transition hover:bg-stone-100"
-                    >
-                      Reject
-                    </button>
+                    {patch.status === 'pending_review' && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => void review(patch.id, 'approve')}
+                          disabled={inFlightId !== null}
+                          className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:opacity-50"
+                        >
+                          Approve
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void review(patch.id, 'reject')}
+                          disabled={inFlightId !== null}
+                          className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm font-medium text-stone-700 transition hover:bg-stone-100 disabled:opacity-50"
+                        >
+                          Reject
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
                 <p className="mt-3 text-sm leading-6 text-stone-700">
@@ -281,6 +383,19 @@ export function PatchReviewPanel() {
                             </pre>
                           </details>
                         )}
+                        {latestVerification &&
+                          !['COMPLETED', 'FAILED', 'CANCELLED'].includes(
+                            latestVerification.status,
+                          ) && (
+                            <button
+                              type="button"
+                              onClick={() => void cancel(latestVerification.id)}
+                              disabled={inFlightId === latestVerification.id}
+                              className="mt-3 rounded-lg border border-rose-300 bg-white px-3 py-1.5 text-xs font-medium text-rose-800 disabled:opacity-50"
+                            >
+                              Cancel verification
+                            </button>
+                          )}
                       </div>
                     )}
                   </div>

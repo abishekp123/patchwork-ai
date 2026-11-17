@@ -58,7 +58,7 @@ export interface VerificationRecord {
 
 export interface SandboxStatus {
   available: boolean
-  mode: string
+  mode: 'fake' | 'docker'
   reason?: string | null
 }
 
@@ -85,9 +85,15 @@ export async function getSandboxStatus(): Promise<SandboxStatus> {
     throw new Error('The API returned an invalid sandbox status response.')
   }
   const candidate = data as Record<string, unknown>
+  if (
+    typeof candidate.available !== 'boolean' ||
+    (candidate.mode !== 'fake' && candidate.mode !== 'docker')
+  ) {
+    throw new Error('The API returned an invalid sandbox status response.')
+  }
   return {
-    available: Boolean(candidate.available),
-    mode: typeof candidate.mode === 'string' ? candidate.mode : 'fake',
+    available: candidate.available,
+    mode: candidate.mode,
     reason: typeof candidate.reason === 'string' ? candidate.reason : null,
   }
 }

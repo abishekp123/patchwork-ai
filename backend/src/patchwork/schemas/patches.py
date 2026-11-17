@@ -9,7 +9,7 @@ class PatchRequest(BaseModel):
 
     repository_id: str = Field(pattern=r"^[0-9a-f]{64}$")
     description: str = Field(min_length=1, max_length=8000)
-    investigation_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    investigation_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{32}$")
     evidence_ids: list[str] = Field(default_factory=list, max_length=20)
 
 
