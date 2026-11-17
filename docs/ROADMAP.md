@@ -1,20 +1,25 @@
 # Roadmap
 
-1. **Foundation — implemented.** Modular API/UI, SQLite, health checks, CI, docs.
+1. **Foundation — implemented.** Modular API/UI, SQLite, health checks, CI, and
+   documentation.
 2. **Repository ingestion and code intelligence — implemented.** Public GitHub
    snapshots pinned to commits, secure Python discovery, Tree-sitter extraction,
-   transactional indexes, and typed lexical/symbol retrieval APIs.
-3. **Evidence-based investigation.** Bug-report/session persistence, structured
-   investigator tools over this index, bounded orchestration, and reviewable
-   evidence/traces. Define measurable evaluation cases before expanding autonomy.
-4. **Proposed repair and isolated verification.** Reviewable patches and restricted
-   disposable Docker execution with time/resource/network policies. No host execution
-   of imported code and no automatic merge.
-5. **Durability and evaluation.** Persisted run state, cancellation/retries,
-   replayable traces, and measured investigation/repair quality on versioned cases.
-6. **Production hardening.** Authentication/authorization, observability, deployment,
-   quotas, snapshot garbage collection, and scaling based on measured need.
+   immutable transactional indexes, and typed lexical/symbol retrieval APIs.
+3. **Evidence-based investigation — implemented.** Persisted sessions, bounded
+   read-only tools, validated citations and reports, asynchronous local execution,
+   history, cancellation, and React evidence navigation.
+4. **Proposed repair and review — implemented.** Provider-backed source edits,
+   deterministic evidence/path/hash/syntax checks, unified diffs, persistence,
+   human approval/rejection, and React review controls.
+5. **Isolated verification — implemented.** Approved-patch checks over independent
+   snapshots in restricted Docker containers, lifecycle persistence, cancellation,
+   comparison results, opt-in real-Docker fixtures, and UI integration.
+6. **Integrated developer workspace — implemented.** Repository browsing/search,
+   investigation-to-patch workflow, persisted activity dashboard, request
+   correlation, and an offline fake-provider workflow evaluation.
+7. **Production hardening — future.** Authentication/authorization, durable
+   external workers, global quotas, automated snapshot collection, managed
+   telemetry, deployment, and broader measured model-quality evaluation.
 
-The user revised Milestone 2 to include code intelligence. Bug reports and an
-investigation UI remain future scope. Every later milestone requires explicit
-approval; no Milestone 3 implementation is included here.
+Imported code remains inert during indexing and host-side workflow evaluation.
+Docker runs only after human approval and remains a shared-kernel boundary.

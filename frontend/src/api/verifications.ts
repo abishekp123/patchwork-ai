@@ -110,7 +110,7 @@ export async function createPatchVerification(
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify({
-      sandbox_mode: payload?.sandbox_mode ?? 'fake',
+      sandbox_mode: payload?.sandbox_mode ?? 'docker',
       baseline_command: payload?.baseline_command ?? 'python -m pytest -q',
       patched_command: payload?.patched_command ?? 'python -m pytest -q',
     }),

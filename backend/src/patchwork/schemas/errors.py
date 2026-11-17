@@ -11,6 +11,7 @@ class ErrorDetail(BaseModel):
     code: str
     message: str
     repository_id: str | None = None
+    request_id: str | None = None
     details: list[ValidationIssue] = Field(default_factory=list)
 
 

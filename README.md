@@ -1,24 +1,19 @@
 # Patchwork AI
 
 A platform for AI-assisted code investigation and verified repair.
-**Milestones 1–4 are implemented:** a FastAPI API, SQLite indexes, a React
-health dashboard, deterministic repository ingestion and code intelligence,
-a bounded investigation orchestration loop, a reviewable patch workflow, and a
-hardening pass covering evidence validation, path safety, and review-state
-conflict prevention. The **Milestone 5 verification workflow** compares approved
-patches against independent baseline and patched snapshots in Docker, without
-executing imported repository code on the host. A pinned-image Docker integration
-suite exercises this boundary using only hash-allowlisted local fixtures.
-Import public GitHub repositories at pinned commits, inspect Tree-sitter symbols
-and imports, search source without an LLM key, run investigation sessions that
-validate source evidence before a reviewed report is accepted, and create
-reviewable patch proposals that persist until a human approves or rejects them.
-Repository operations are API-only; the frontend exposes the health and review
-interfaces while the backend owns repository indexing, investigations, patch
-validation, and approval state. Current patch validation rejects fabricated and
-stale evidence, traversal or symlink-like paths, duplicate edits, no-op changes,
-syntax-invalid updates, and repeated approval/rejection attempts after a patch is
-reviewed.
+Milestones 1–5 and the integrated developer workspace are implemented: browse
+immutable repository snapshots, search indexed source, investigate with cited
+evidence, propose and review patches, and compare approved patches using isolated
+verification. A persisted dashboard summarizes workspace activity; an offline
+evaluation command exercises the investigation-to-approval flow without an API
+key. Imported repository code is never executed on the host.
+
+The backend owns indexing, investigation orchestration, deterministic patch
+validation, review state, verification, and persistence. Live investigation and
+patch generation require `OPENAI_API_KEY`; missing credentials are surfaced
+explicitly and never replaced with fake provider output. Fake providers and fake
+sandbox execution are test-only paths. Runtime verification requires the
+configured Docker sandbox and fails closed if it is unavailable.
 
 ## Requirements
 
@@ -64,8 +59,9 @@ cd frontend
 npm run dev
 ```
 
-Open **http://127.0.0.1:5173**. The page fetches `/api/health`; Vite proxies it
-to the backend's `/health`. Use **Refresh status** to check again. API docs are at
+Open **http://127.0.0.1:5173** to browse repositories, investigate indexed
+source, propose patches, review them, and view persisted activity and
+verification results. Vite proxies `/api/*` to the backend. API docs are at
 http://127.0.0.1:8000/docs. Stop either server with Ctrl+C.
 
 ```sh
@@ -85,7 +81,15 @@ Startup creates its parent directory and applies transactional SQLite migrations
 Existing Milestone 1 databases upgrade automatically; back up persistent data
 before upgrades. `PATCHWORK_API_PROXY_TARGET` defaults to
 `http://127.0.0.1:8000`. Restart Vite after changing it. Do not put secrets in
-`VITE_*` variables: Vite exposes those to the browser.
+`VITE_*` variables: Vite exposes those to the browser. Set `OPENAI_API_KEY` in
+the root `.env` to enable live model-backed investigation and patch generation.
+There is no automatic offline/fake fallback when the key is missing.
+
+To enable the review UI's runtime verification action, configure
+`PATCHWORK_SANDBOX_MODE=docker`, ensure Docker is available, and pre-pull the
+pinned sandbox image described in the Docker integration section. Requests
+default to Docker execution; the API does not silently substitute fake results.
+The fake adapter is reserved for explicitly selected deterministic tests.
 
 If the dashboard cannot connect, check the backend terminal and direct health
 URL, then the proxy target. An invalid database prevents startup; a database
@@ -152,6 +156,20 @@ GitHub Actions runs the same checks on pushes to `master` and pull requests.
 Backend integration tests create small temporary Git repositories; core tests
 never depend on GitHub network access or an LLM key.
 
+### Offline workflow evaluation
+
+Run the deterministic evaluation from `backend/`:
+
+```sh
+.venv/bin/python -m patchwork.evaluations
+```
+
+It uses a fake provider and a temporary SQLite database to check investigation
+completion, evidence citation, source-validated patch generation, persistence,
+human approval, and indexed-snapshot immutability. It needs no API key or Docker
+daemon, does not execute repository code, and does not represent live model
+quality or real sandbox execution.
+
 ### Opt-in Docker sandbox integration tests
 
 The normal backend suite does not start Docker. To run the separate real-container
@@ -189,8 +207,9 @@ API proxy. A future production server must serve the static build and route
 
 ## Layout and documentation
 
-- `backend/src/patchwork/`: API/schemas, ingestion, Tree-sitter/search, repository storage, migrations
-- `frontend/src/`: API client, health feature, React presentation
+- `backend/src/patchwork/`: typed API/schemas, ingestion, indexed retrieval,
+  investigation and patch workflows, isolated verification, evaluation, and storage
+- `frontend/src/`: API client and React workspace, patch-review, and verification UI
 - [Architecture](docs/ARCHITECTURE.md) · [API contracts](docs/CONTRACTS.md)
 - [Decisions](docs/DECISIONS.md) · [Roadmap](docs/ROADMAP.md)
 - [Session handoff](docs/SESSION.md) · [Agent instructions](AGENTS.md)

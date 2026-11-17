@@ -80,6 +80,25 @@ describe('DeveloperWorkspace', () => {
     const fetchMock = vi.fn(
       async (input: string | URL | Request, init?: RequestInit) => {
         const url = String(input)
+        if (url === '/api/dashboard')
+          return response({
+            ready_repositories: 1,
+            investigations: 1,
+            pending_patches: 1,
+            approved_patches: 0,
+            active_verifications: 0,
+            completed_verifications: 0,
+            recent_activity: [
+              {
+                kind: 'patch',
+                id: 'patch-1',
+                repository_id: repositoryId,
+                status: 'pending_review',
+                updated_at: '2026-01-01T00:00:02Z',
+                label: 'Validated repair draft',
+              },
+            ],
+          })
         if (url === '/api/repositories')
           return response({ items: [repository], total: 1 })
         if (url === '/api/investigations/provider-status')
@@ -148,6 +167,8 @@ describe('DeveloperWorkspace', () => {
 
     render(<DeveloperWorkspace />)
 
+    expect(await screen.findByText('Pending review')).toBeInTheDocument()
+    expect(screen.getByText('Validated repair draft')).toBeInTheDocument()
     expect(await screen.findByText('def bug():')).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Describe the bug or question'), {
       target: { value: 'Investigate the incorrect result.' },

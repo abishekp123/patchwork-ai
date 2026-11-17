@@ -22,6 +22,13 @@ VALID_STATUSES = {
     "FAILED",
     "CANCELLED",
 }
+ACTIVE_STATUSES = {
+    "CREATED",
+    "PREPARING",
+    "RUNNING_BASELINE",
+    "RUNNING_PATCHED",
+    "COMPARING",
+}
 
 
 class VerificationStore:
@@ -39,6 +46,19 @@ class VerificationStore:
         identifier = uuid.uuid4().hex
         now = timestamp()
         with connect_database(self.database_path) as connection, connection:
+            connection.execute("BEGIN IMMEDIATE")
+            active = connection.execute(
+                "SELECT id FROM verifications WHERE patch_id=? AND status IN ("
+                + ",".join("?" for _ in ACTIVE_STATUSES)
+                + ") LIMIT 1",
+                (patch_id, *sorted(ACTIVE_STATUSES)),
+            ).fetchone()
+            if active is not None:
+                raise PatchworkError(
+                    "verification_in_progress",
+                    "A verification is already active for this patch.",
+                    409,
+                )
             connection.execute(
                 """
                 INSERT INTO verifications (

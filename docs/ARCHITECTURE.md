@@ -1,13 +1,15 @@
 # Architecture
 
-## Implemented through Milestone 5 verification
+## Implemented developer workspace and verification workflow
 
 ```text
 HTTP request → repository service → bounded Git plumbing → Python blob discovery
                                → Tree-sitter → transactional SQLite publication
 HTTP retrieval → SQLite metadata / exact symbols / bounded lexical source search
+React workspace → repository/investigation/patch APIs → SQLite
 Approved patch → immutable index → independent snapshots → restricted Docker
-React review UI → verification lifecycle API → SQLite
+React review UI → verification lifecycle API → SQLite → persisted dashboard
+Offline evaluation CLI → fake provider → investigation → validated patch → approval
 ```
 
 - `api/` and `schemas/`: HTTP validation, response contracts, and consistent error
@@ -39,6 +41,16 @@ React review UI → verification lifecycle API → SQLite
 - `api/verifications.py` and `frontend/src/api/verifications.ts`: typed routes and
   clients expose creation, status/results, cancellation, and sandbox availability.
   The patch review UI polls persisted status and renders backend-reported outcomes.
+- `api/dashboard.py`: reads bounded workspace counts and the 12 most recent
+  persisted investigation, patch, and verification records. The React workspace
+  refreshes this summary periodically; it does not invent activity or outcomes.
+- `evaluations/`: an offline deterministic command drives a fake-provider
+  investigation through evidence validation, patch generation, persistence, and
+  approval. It is an evaluation fixture, not a live-provider substitute or a
+  repository-code execution path.
+- `api/observability.py`: correlates requests with validated request IDs, returns
+  the ID in response headers/error envelopes, and logs route templates and
+  durations without query strings.
 
 ## Storage and consistency
 
@@ -53,6 +65,8 @@ all file/symbol/import rows and the ready status together. Failures retain a
 sanitized error record and expose no partial index. Competing claims return 409;
 a crashed claim can be reclaimed after its lease expires (ingestion budget plus
 30 seconds). Tokens prevent an expired worker from overwriting a new attempt.
+Concurrent verification creation is serialized with an immediate SQLite
+transaction; only one active run for a patch is admitted at a time.
 
 Bare snapshots live outside the application tree in a private directory. Completed
 files are mode 0444 and directories 0555; ingestion only reads published snapshots.
@@ -94,6 +108,8 @@ pinned image, or required policy is unavailable.
 
 Import names are not resolved into dependency or call graphs. Authentication,
 authorization, durable external workers/queues, global storage quotas, automatic
-snapshot garbage collection, and production observability/deployment remain
-future work. Model-based patch/investigation quality also needs a versioned
-evaluation corpus; current workflow tests use deterministic fake providers.
+snapshot garbage collection, and production deployment remain future work.
+Request correlation and local request logging are implemented, but are not a
+replacement for managed production telemetry. Model-based patch/investigation
+quality still needs a larger versioned evaluation corpus; the current end-to-end
+evaluation is deterministic and uses fake providers.

@@ -14,6 +14,7 @@ import {
   type ProviderStatus,
 } from '../../api/investigations'
 import { createPatch, type PatchRecord } from '../../api/patches'
+import { getDashboard, type DashboardSummary } from '../../api/dashboard'
 import {
   getRepositoryFile,
   importRepository,
@@ -69,6 +70,8 @@ export function DeveloperWorkspace({
   const [importError, setImportError] = useState<string | null>(null)
   const [loadingRepositories, setLoadingRepositories] = useState(true)
   const [workspaceError, setWorkspaceError] = useState<string | null>(null)
+  const [dashboard, setDashboard] = useState<DashboardSummary | null>(null)
+  const [dashboardError, setDashboardError] = useState<string | null>(null)
   const [provider, setProvider] = useState<ProviderStatus | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<SearchHit[]>([])
@@ -160,6 +163,33 @@ export function DeveloperWorkspace({
     void load()
     return () => {
       active = false
+    }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    const refresh = async () => {
+      try {
+        const summary = await getDashboard()
+        if (active) {
+          setDashboard(summary)
+          setDashboardError(null)
+        }
+      } catch (issue) {
+        if (active) {
+          setDashboardError(
+            issue instanceof Error
+              ? issue.message
+              : 'Dashboard metrics are unavailable.',
+          )
+        }
+      }
+    }
+    void refresh()
+    const timer = window.setInterval(() => void refresh(), 10_000)
+    return () => {
+      active = false
+      window.clearInterval(timer)
     }
   }, [])
 
@@ -451,13 +481,13 @@ export function DeveloperWorkspace({
 
   return (
     <section aria-label="Developer workspace" className="space-y-6">
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-6">
         <div className="rounded-xl border border-stone-200 bg-white px-5 py-4">
           <p className="font-mono text-[11px] tracking-wider text-stone-500 uppercase">
             Indexed repositories
           </p>
           <p className="mt-2 text-2xl font-semibold tabular-nums">
-            {repositories.length}
+            {dashboard?.ready_repositories ?? repositories.length}
           </p>
         </div>
         <div className="rounded-xl border border-stone-200 bg-white px-5 py-4">
@@ -465,9 +495,21 @@ export function DeveloperWorkspace({
             Investigations
           </p>
           <p className="mt-2 text-2xl font-semibold tabular-nums">
-            {visibleInvestigations.length}
+            {dashboard?.investigations ?? visibleInvestigations.length}
           </p>
         </div>
+        <MetricCard
+          label="Pending review"
+          value={dashboard?.pending_patches ?? '—'}
+        />
+        <MetricCard
+          label="Approved patches"
+          value={dashboard?.approved_patches ?? '—'}
+        />
+        <MetricCard
+          label="Active verifications"
+          value={dashboard?.active_verifications ?? '—'}
+        />
         <div className="rounded-xl border border-stone-200 bg-white px-5 py-4">
           <p className="font-mono text-[11px] tracking-wider text-stone-500 uppercase">
             LLM provider
@@ -477,6 +519,39 @@ export function DeveloperWorkspace({
           </p>
         </div>
       </div>
+      {(dashboardError || dashboard?.recent_activity.length) && (
+        <details className="rounded-xl border border-stone-200 bg-white px-4 py-3">
+          <summary className="cursor-pointer text-xs font-medium text-stone-700">
+            Recent persisted activity
+            {dashboard ? ` · ${dashboard.recent_activity.length} items` : ''}
+          </summary>
+          {dashboardError && (
+            <p role="status" className="mt-2 text-xs text-stone-500">
+              {dashboardError}
+            </p>
+          )}
+          {dashboard && dashboard.recent_activity.length > 0 && (
+            <ul className="mt-3 divide-y divide-stone-100">
+              {dashboard.recent_activity.slice(0, 6).map((activity) => (
+                <li
+                  key={`${activity.kind}:${activity.id}`}
+                  className="flex flex-wrap items-center justify-between gap-2 py-2 text-xs"
+                >
+                  <span className="min-w-0 truncate text-stone-700">
+                    <span className="mr-2 font-mono text-[10px] uppercase text-stone-400">
+                      {activity.kind}
+                    </span>
+                    {activity.label}
+                  </span>
+                  <span className="font-mono text-[10px] text-stone-500">
+                    {activity.status.toLowerCase()}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </details>
+      )}
 
       <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(340px,0.82fr)]">
         <div className="min-w-0 space-y-5">
@@ -1020,6 +1095,23 @@ export function DeveloperWorkspace({
         </aside>
       </div>
     </section>
+  )
+}
+
+function MetricCard({
+  label,
+  value,
+}: {
+  label: string
+  value: number | string
+}) {
+  return (
+    <div className="rounded-xl border border-stone-200 bg-white px-5 py-4">
+      <p className="font-mono text-[11px] tracking-wider text-stone-500 uppercase">
+        {label}
+      </p>
+      <p className="mt-2 text-2xl font-semibold tabular-nums">{value}</p>
+    </div>
   )
 }
 

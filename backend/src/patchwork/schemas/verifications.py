@@ -9,7 +9,7 @@ class VerificationRequest(BaseModel):
 
     baseline_command: str | None = Field(default=None, min_length=1, max_length=200)
     patched_command: str | None = Field(default=None, min_length=1, max_length=200)
-    sandbox_mode: str = Field(default="fake", pattern=r"^(fake|docker)$")
+    sandbox_mode: str = Field(default="docker", pattern=r"^(fake|docker)$")
 
 
 class VerificationResponse(BaseModel):

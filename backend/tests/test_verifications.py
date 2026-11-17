@@ -1,4 +1,5 @@
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -229,3 +230,45 @@ def test_verification_store_rejects_invalid_status_updates(settings: Settings):
     )
     with pytest.raises(ValueError, match="Unsupported verification status"):
         VerificationStore(settings.database_path).update(record.id, status="NOT_REAL")
+
+
+def test_concurrent_verification_creation_allows_only_one_active_run(settings: Settings):
+    repository = _ready_repository(settings)
+    patch = PatchStore(settings.database_path).create(
+        repository,
+        PatchProposal(
+            title="Concurrent review",
+            summary="Run only one active verification per approved patch.",
+            changes=[
+                PatchChange(
+                    path="example.py",
+                    before="def bug():\n    return 1\n",
+                    after="def bug():\n    return 2\n",
+                    reason="Exercise verification serialization.",
+                )
+            ],
+        ),
+    )
+    PatchStore(settings.database_path).transition(
+        patch.id,
+        "approved",
+        reviewer="human",
+        reason="Approved for the concurrency test.",
+    )
+    store = VerificationStore(settings.database_path)
+
+    def create():
+        try:
+            return store.create(
+                patch_id=patch.id,
+                repository_id=repository.id,
+                commit_sha=repository.commit_sha,
+                sandbox_mode="fake",
+            )
+        except PatchworkError as error:
+            return error.code
+
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        results = list(workers.map(lambda _: create(), range(2)))
+    assert sum(not isinstance(result, str) for result in results) == 1
+    assert results.count("verification_in_progress") == 1

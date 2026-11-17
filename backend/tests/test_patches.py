@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from fastapi.testclient import TestClient
@@ -381,6 +382,44 @@ def test_patch_api_rejects_cross_repository_investigations(settings: Settings):
     )
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "investigation_snapshot_mismatch"
+
+
+def test_concurrent_review_decisions_have_one_winner(settings: Settings):
+    repository = _ready_repository(settings)
+    record = PatchStore(settings.database_path).create(
+        repository,
+        PatchProposal(
+            title="Concurrent review",
+            summary="Only one human decision can resolve a patch.",
+            changes=[
+                PatchChange(
+                    path="example.py",
+                    before="def bug():\n    return 1\n",
+                    after="def bug():\n    return 2\n",
+                    reason="Exercise atomic review state transitions.",
+                )
+            ],
+        ),
+    )
+    store = PatchStore(settings.database_path)
+
+    def decide(status: str):
+        try:
+            return store.transition(
+                record.id,
+                status,
+                reviewer=status,
+                reason="Concurrent decision.",
+            ).status
+        except PatchworkError as error:
+            return error.code
+
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        results = list(workers.map(decide, ("approved", "rejected")))
+    winners = [result for result in results if result in {"approved", "rejected"}]
+    assert len(winners) == 1
+    assert results.count("patch_review_conflict") == 1
+    assert store.get(record.id).status == winners[0]
 
 
 def test_patch_api_requires_completed_snapshot_matched_citations(

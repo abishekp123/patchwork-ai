@@ -96,7 +96,7 @@ when present. This is lexical retrieval, not semantic relevance scoring.
 ## Errors
 
 ```json
-{"error":{"code":"invalid_revision","message":"The commit is unavailable in this repository.","repository_id":null,"details":[]}}
+{"error":{"code":"invalid_revision","message":"The commit is unavailable in this repository.","repository_id":null,"request_id":"trace-42","details":[]}}
 ```
 
 A persisted failure includes its repository ID. Request validation returns
@@ -106,3 +106,57 @@ Status codes: 404 missing snapshot/revision; 409 busy/not-ready/lost claim;
 503 storage/Git unavailable; 504 deadline; 500 unexpected indexing failure.
 Upstream stderr and local paths stay server-side. HTTP errors use the same envelope.
 No authentication or public deployment is provided in this milestone.
+
+Every response includes `X-Request-ID`. A caller-provided ID is accepted only if it
+matches `[A-Za-z0-9._-]{1,64}`; otherwise the server generates one. Error envelopes
+include the same value as `error.request_id`. Request logs use route templates and
+omit query strings.
+
+## Workspace, investigations, and patches
+
+| Method and route | Behavior |
+| --- | --- |
+| `GET /api/dashboard` | Persisted workspace counts and up to 12 recent investigation, patch, and verification records |
+| `GET /api/investigations/provider-status` | Reports whether the configured OpenAI provider is available |
+| `POST /api/investigations` | Creates a persisted investigation and returns immediately while a local background task runs |
+| `GET /api/investigations` | Paginated history; optional `repository_id` filter |
+| `GET /api/investigations/{id}` | Persisted investigation state and reviewed report |
+| `GET /api/investigations/{id}/steps` | Paginated orchestration trace |
+| `POST /api/investigations/{id}/cancel` | Requests cancellation of a running investigation |
+| `POST /api/patches` | Generates a source- and evidence-validated patch proposal |
+| `GET /api/patches` and `GET /api/patches/{id}` | List and retrieve persisted patches |
+| `POST /api/patches/{id}/approve` | Human approval; only pending patches can transition |
+| `POST /api/patches/{id}/reject` | Human rejection; only pending patches can transition |
+
+Investigation and patch generation require `OPENAI_API_KEY`; missing credentials
+return an explicit provider error. Patch creation from an investigation requires
+a completed report and evidence IDs cited by that report from the same immutable
+repository snapshot. Patch validation rejects unsafe, stale, unsupported, or
+no-op changes before persistence. Approval/rejection conflicts return 409.
+Investigation tasks are process-local: persisted records survive restarts, but
+there is no durable task queue or automatic resume.
+
+## Verification
+
+| Method and route | Behavior |
+| --- | --- |
+| `POST /api/patches/{id}/verifications` | Starts asynchronous verification of an approved patch; request mode defaults to `docker` |
+| `GET /api/patches/{id}/verifications` | Paginated verification history for a patch |
+| `GET /api/verifications/{id}` | Persisted lifecycle and summaries |
+| `GET /api/verifications/{id}/results` | Persisted deterministic comparison result |
+| `POST /api/verifications/{id}/cancel` | Cancels a running verification where possible |
+| `GET /api/verification/sandbox-status` | Reports configured sandbox availability and policy failures |
+
+Only approved patches tied to the same ready repository snapshot can be run.
+Baseline and patched versions use independent snapshots and the same allowlisted
+command. Docker is the runtime default and fails closed on unavailable or unsafe
+configuration; fake mode must be explicitly selected for deterministic tests.
+Concurrent active verification requests for one patch return 409. Results are
+classified as `IMPROVED`, `REGRESSED`, `UNCHANGED`, `FAILED`, or
+`SANDBOX_UNAVAILABLE` according to backend summaries. The frontend displays
+persisted backend responses rather than synthesizing progress or test outcomes.
+
+The offline command `.venv/bin/python -m patchwork.evaluations` exercises the
+investigation-to-approval path with deterministic fake responses and temporary
+storage. It does not call an external provider, execute indexed code, or perform
+Docker verification.

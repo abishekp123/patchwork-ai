@@ -10,6 +10,7 @@ from patchwork.main import create_app
 from patchwork.patches.engine import PatchChange, PatchProposal
 from patchwork.patches.store import PatchStore
 from patchwork.repositories.store import RepositoryStore
+from patchwork.schemas.verifications import VerificationRequest
 
 
 def _ready_repository(settings: Settings):
@@ -140,3 +141,7 @@ def test_sandbox_status_api_reports_fake_mode(settings: Settings):
         payload = response.json()
         assert payload["mode"] in {"fake", "docker"}
         assert "available" in payload
+
+
+def test_verification_request_defaults_to_real_docker_execution():
+    assert VerificationRequest().sandbox_mode == "docker"
