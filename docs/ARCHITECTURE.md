@@ -1,12 +1,13 @@
 # Architecture
 
-## Implemented through Milestone 2
+## Implemented through Milestone 5 verification
 
 ```text
 HTTP request → repository service → bounded Git plumbing → Python blob discovery
                                → Tree-sitter → transactional SQLite publication
 HTTP retrieval → SQLite metadata / exact symbols / bounded lexical source search
-React health dashboard → Vite /api proxy → FastAPI /health → SQLite
+Approved patch → immutable index → independent snapshots → restricted Docker
+React review UI → verification lifecycle API → SQLite
 ```
 
 - `api/` and `schemas/`: HTTP validation, response contracts, and consistent error
@@ -27,6 +28,17 @@ React health dashboard → Vite /api proxy → FastAPI /health → SQLite
 - `intelligence/search.py`: indexed exact symbol lookup, deterministic lexical
   ranking, and bounded source scanning. Retrieval reads persisted source, so it
   never opens user-supplied paths or runs tools inside a repository.
+- `patches/` and `investigations/`: evidence-backed repair proposals are checked
+  against a pinned SQLite snapshot and require human approval before verification.
+  Unified diffs are applied only to a disposable patched snapshot; the published
+  source index remains unchanged.
+- `verifications/`: persist the run lifecycle and baseline/patched summaries.
+  Docker mode runs the same allowlisted command in separate containers over
+  independent temporary snapshots. Fake mode is for deterministic unit tests
+  only and is not a Docker execution substitute.
+- `api/verifications.py` and `frontend/src/api/verifications.ts`: typed routes and
+  clients expose creation, status/results, cancellation, and sandbox availability.
+  The patch review UI polls persisted status and renders backend-reported outcomes.
 
 ## Storage and consistency
 
@@ -62,11 +74,26 @@ counts, and response/snippet limits bound each operation. Disk checks poll every
 or a global disk quota. This service targets local POSIX development. Git must
 remain patched; public hosting and adversarial multi-tenant isolation are deferred.
 
+Docker verification uses a SHA-256-pinned, multi-architecture Python slim image,
+non-root numeric UID, `--network=none`, a read-only container root, dropped
+capabilities, `no-new-privileges`, CPU/memory/PID limits, strict execution
+timeouts, and bounded captured output. Only a disposable indexed snapshot and a
+temporary runner script are mounted; the repository root and Docker socket are
+not mounted. Timed-out containers are explicitly removed and cleanup is checked.
+The host process prepares and deletes snapshot directories but does not execute
+their Python code. The optional real-Docker test suite runs only hash-allowlisted,
+locally authored fixtures and is excluded from normal CI.
+
+Containers still share the Docker daemon and host kernel; this is not a VM-level
+security boundary against kernel/daemon vulnerabilities or a defense for a
+compromised Docker Desktop installation. The adapter depends on a trusted daemon
+and its default seccomp profile. Docker execution fails closed when the daemon,
+pinned image, or required policy is unavailable.
+
 ## Future boundaries (not implemented)
 
-The investigator will consume pinned files, symbols, imports, and search results
-through typed tools and record evidence/traces. Import names are not resolved
-into dependency or call graphs. There is no LLM, patch generation, authentication,
-queue, vector database, or imported-code execution. Future verification must use
-restricted disposable Docker environments with resource/network controls and no
-host secrets. Durable execution and model evaluation come after that workflow.
+Import names are not resolved into dependency or call graphs. Authentication,
+authorization, durable external workers/queues, global storage quotas, automatic
+snapshot garbage collection, and production observability/deployment remain
+future work. Model-based patch/investigation quality also needs a versioned
+evaluation corpus; current workflow tests use deterministic fake providers.

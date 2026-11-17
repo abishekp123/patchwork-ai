@@ -1,0 +1,21 @@
+{
+  "image": "python@sha256:593bd06efe90efa80dc4eee3948be7c0fde4134606dd40d8dd8dbcade98e669c",
+  "platform": "linux/arm64",
+  "files": {
+    "calculator.py": "8f85450200db13108dc37d54ada5376d715d7c7aff3bceb5ffa1f6a75b0c8a03",
+    "tests/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "tests/fixture_test_calculator.py": "5e0700513b812baf45cf9a75c58d266fc71c554d22a847f9c35bf27a67a9ae54",
+    "tests/fixture_test_sandbox_policy.py": "8b63d9c06ea07719f6527ca9a737c6656cf99e4420f5733851af3a2541e67de4",
+    "tests/fixture_test_noisy_output.py": "22e047e989bd094a77075bbaa21acaed01918ded274d55561ea4feb5e70a3e6e",
+    "timeout_fixture/timeout_fixture.py": "71ab9d277dee4fd5b1630c5bc2ebe10dedb7cc439ca3acfce030957af4cd9343"
+  },
+  "snapshot_files": [
+    "calculator.py",
+    "tests/__init__.py",
+    "tests/fixture_test_calculator.py",
+    "tests/fixture_test_sandbox_policy.py",
+    "tests/fixture_test_noisy_output.py"
+  ],
+  "baseline_command": "python -m unittest discover -v -p 'fixture_test_*.py'",
+  "timeout_command": "python -m unittest discover -v -p 'timeout_fixture.py'"
+}

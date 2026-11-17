@@ -3,11 +3,12 @@ from __future__ import annotations
 import asyncio
 import re
 import tempfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from patchwork.config import Settings
 from patchwork.database import connect_database
 from patchwork.errors import PatchworkError
+from patchwork.ingestion.validation import validate_path
 from patchwork.patches.store import PatchStore
 from patchwork.repositories.store import timestamp
 from patchwork.verifications.models import (
@@ -34,90 +35,142 @@ def _populate_snapshot(database_path: Path, repository_id: str, destination: Pat
 
 
 def _apply_unified_diff_to_file(file_path: Path, diff_text: str) -> None:
-    if not diff_text.strip():
-        return
-    original = file_path.read_text(encoding="utf-8") if file_path.exists() else ""
-    original_lines = original.splitlines(keepends=True)
+    original_lines = file_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    diff_lines = diff_text.splitlines(keepends=True)
     output: list[str] = []
-    line_index = 0
-    lines = diff_text.splitlines()
-    i = 0
-    while i < len(lines):
-        if not lines[i].startswith("--- "):
-            i += 1
+    old_index = 0
+    index = 0
+    found_hunk = False
+
+    while index < len(diff_lines):
+        header = re.match(
+            r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@",
+            diff_lines[index],
+        )
+        if header is None:
+            index += 1
             continue
-        if i + 1 >= len(lines) or not lines[i + 1].startswith("+++ "):
-            break
-        file_marker = lines[i][4:].strip()
-        if file_marker not in {"/dev/null", ""}:
-            pass
-        i += 2
-        while i < len(lines) and not lines[i].startswith("--- "):
-            if not lines[i].startswith("@@ "):
-                i += 1
+        found_hunk = True
+        old_start = int(header.group(1))
+        old_count = int(header.group(2) or 1)
+        new_count = int(header.group(4) or 1)
+        target_index = max(old_start - 1, 0)
+        if target_index < old_index or target_index > len(original_lines):
+            raise PatchworkError(
+                "verification_patch_invalid", "Patch hunks overlap or exceed the source.", 409
+            )
+        output.extend(original_lines[old_index:target_index])
+        old_index = target_index
+        consumed_old = 0
+        produced_new = 0
+        index += 1
+
+        while index < len(diff_lines) and not diff_lines[index].startswith("@@ "):
+            current = diff_lines[index]
+            if current in {"\n", "\r\n"}:
+                index += 1
                 continue
-            match = re.match(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@", lines[i])
-            if match is None:
-                i += 1
+            if current.startswith("\\"):
+                if output and output[-1].endswith("\n"):
+                    output[-1] = output[-1][:-1]
+                index += 1
                 continue
-            start = max(0, int(match.group(1)) - 1)
-            while line_index < start:
-                output.append(original_lines[line_index])
-                line_index += 1
-            i += 1
-            while (
-                i < len(lines)
-                and not lines[i].startswith("@@ ")
-                and not lines[i].startswith("--- ")
-            ):
-                current = lines[i]
-                if current.startswith(" "):
-                    output.append(current[1:] + ("\n" if not current.endswith("\n") else ""))
-                    line_index += 1
-                elif current.startswith("-"):
-                    line_index += 1
-                elif current.startswith("+"):
-                    output.append(current[1:] + ("\n" if not current.endswith("\n") else ""))
-                i += 1
-    while line_index < len(original_lines):
-        output.append(original_lines[line_index])
-        line_index += 1
+            if not current or current[0] not in " +-":
+                break
+            marker, content = current[0], current[1:]
+            if marker in " -":
+                if old_index >= len(original_lines):
+                    raise PatchworkError(
+                        "verification_patch_invalid",
+                        "Patch removes or references content beyond the source.",
+                        409,
+                    )
+                original_line = original_lines[old_index]
+                if original_line.rstrip("\r\n") != content.rstrip("\r\n"):
+                    raise PatchworkError(
+                        "verification_patch_stale",
+                        "Patch context does not match the indexed source.",
+                        409,
+                    )
+                old_index += 1
+                consumed_old += 1
+            if marker in " +":
+                output.append(original_lines[old_index - 1] if marker == " " else content)
+                produced_new += 1
+            index += 1
+
+        if consumed_old != old_count or produced_new != new_count:
+            raise PatchworkError(
+                "verification_patch_invalid",
+                "Patch hunk line counts do not match its contents.",
+                409,
+            )
+
+    if not found_hunk:
+        raise PatchworkError("verification_patch_invalid", "Patch contains no valid hunks.", 409)
+    output.extend(original_lines[old_index:])
     file_path.write_text("".join(output), encoding="utf-8")
 
 
 def _apply_patch_to_snapshot(root: Path, diff_text: str) -> None:
-    lines = diff_text.splitlines()
-    i = 0
-    while i < len(lines):
-        if not lines[i].startswith("--- "):
-            i += 1
-            continue
-        if i + 1 >= len(lines) or not lines[i + 1].startswith("+++ "):
-            break
-        target_name = lines[i][4:].strip()
-        if target_name in {"/dev/null", ""}:
-            i += 2
-            continue
-        target_file = root / target_name
-        if target_file.exists():
-            _apply_unified_diff_to_file(target_file, "\n".join(lines[i : i + 2]))
-        i += 2
-        while i < len(lines) and not lines[i].startswith("--- "):
-            if lines[i].startswith("@@ "):
-                start = i
-                i += 1
-                while (
-                    i < len(lines)
-                    and not lines[i].startswith("@@ ")
-                    and not lines[i].startswith("--- ")
-                ):
-                    i += 1
-                _apply_unified_diff_to_file(
-                    target_file,
-                    "\n".join(lines[start:i]),
-                )
-                continue
-            i += 1
+    lines = diff_text.splitlines(keepends=True)
+    blocks: list[list[str]] = []
+    index = 0
+    while index < len(lines):
+        if (
+            lines[index].startswith("--- ")
+            and index + 1 < len(lines)
+            and lines[index + 1].startswith("+++ ")
+        ):
+            start = index
+            index += 2
+            while index < len(lines) and not (
+                lines[index].startswith("--- ")
+                and index + 1 < len(lines)
+                and lines[index + 1].startswith("+++ ")
+            ):
+                index += 1
+            blocks.append(lines[start:index])
+        else:
+            index += 1
+
+    if not blocks:
+        raise PatchworkError("verification_patch_invalid", "Patch contains no file changes.", 409)
+
+    root_resolved = root.resolve()
+    for block in blocks:
+        old_name = block[0][4:].strip()
+        new_name = block[1][4:].strip()
+        if old_name != new_name or old_name in {"/dev/null", ""}:
+            raise PatchworkError(
+                "verification_patch_invalid",
+                "Only modifications to existing files are supported.",
+                409,
+            )
+        try:
+            relative = validate_path(old_name)
+        except PatchworkError as error:
+            raise PatchworkError(
+                "verification_patch_invalid",
+                "Patch contains an unsafe file path.",
+                409,
+            ) from error
+        if PurePosixPath(relative).is_absolute() or ".." in PurePosixPath(relative).parts:
+            raise PatchworkError(
+                "verification_patch_invalid", "Patch contains an unsafe file path.", 409
+            )
+        target = root / relative
+        if (
+            target.is_symlink()
+            or not target.is_file()
+            or not target.resolve().is_relative_to(root_resolved)
+        ):
+            raise PatchworkError(
+                "verification_patch_invalid",
+                "Patch target is missing or escapes the snapshot.",
+                409,
+            )
+        _apply_unified_diff_to_file(target, "".join(block[2:]))
 
 
 def _classify(baseline: VerificationSummary, patched: VerificationSummary) -> VerificationResult:
@@ -153,11 +206,16 @@ def _validate_command(command: str) -> str:
     cleaned = command.strip()
     if not cleaned:
         raise PatchworkError("sandbox_policy", "Verification commands cannot be empty.", 422)
-    if re.fullmatch(r"(?:python(?:3)?\s+-m\s+pytest(?:\s+-q)?|pytest(?:\s+-q)?)", cleaned):
+    if re.fullmatch(
+        r"(?:python(?:3)?\s+-m\s+pytest(?:\s+-q)?|pytest(?:\s+-q)?|"
+        r"python(?:3)?\s+-m\s+unittest\s+discover\s+-v\s+-p\s+"
+        r"'(?:fixture_test_\*\.py|timeout_fixture\.py)')",
+        cleaned,
+    ):
         return cleaned
     raise PatchworkError(
         "sandbox_policy",
-        "Only allowlisted pytest commands are permitted for verification.",
+        "Only allowlisted pytest and trusted-fixture unittest commands are permitted.",
         422,
     )
 
@@ -225,6 +283,7 @@ async def run_verification(
                         )
                     ),
                     timeout_seconds=int(settings.verification_timeout_seconds),
+                    output_limit_bytes=settings.verification_output_limit_bytes,
                 )
             ),
         )

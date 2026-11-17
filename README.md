@@ -5,9 +5,10 @@ A platform for AI-assisted code investigation and verified repair.
 health dashboard, deterministic repository ingestion and code intelligence,
 a bounded investigation orchestration loop, a reviewable patch workflow, and a
 hardening pass covering evidence validation, path safety, and review-state
-conflict prevention. The active **Milestone 5 foundation** adds a fail-closed
-sandbox verification layer that validates approved patches in isolated snapshot
-runs without executing untrusted code on the host.
+conflict prevention. The **Milestone 5 verification workflow** compares approved
+patches against independent baseline and patched snapshots in Docker, without
+executing imported repository code on the host. A pinned-image Docker integration
+suite exercises this boundary using only hash-allowlisted local fixtures.
 Import public GitHub repositories at pinned commits, inspect Tree-sitter symbols
 and imports, search source without an LLM key, run investigation sessions that
 validate source evidence before a reviewed report is accepted, and create
@@ -150,6 +151,36 @@ production build. Use `npm run test:watch` during development. Format with
 GitHub Actions runs the same checks on pushes to `master` and pull requests.
 Backend integration tests create small temporary Git repositories; core tests
 never depend on GitHub network access or an LLM key.
+
+### Opt-in Docker sandbox integration tests
+
+The normal backend suite does not start Docker. To run the separate real-container
+checks, first ensure Docker Desktop/Engine is running and pull the pinned,
+multi-architecture image outside the sandbox (the fixture suite runs its ARM64
+variant on Apple Silicon):
+
+```sh
+docker pull --platform linux/arm64 \
+  python@sha256:593bd06efe90efa80dc4eee3948be7c0fde4134606dd40d8dd8dbcade98e669c
+cd backend
+PATCHWORK_RUN_DOCKER_INTEGRATION=1 \
+  .venv/bin/python -m pytest -m docker_integration -q tests/test_docker_integration.py
+```
+
+If Docker Desktop's bundled CLI is not on `PATH`, prepend
+`/Applications/Docker.app/Contents/Resources/bin` before the `docker pull`
+command. The fixture tests add that path automatically on macOS. Their host-side
+runner uses pytest; the container fixture uses only Python's standard-library
+`unittest`, so it installs no dependencies.
+
+The test manifest pins every locally authored fixture by SHA-256. The tests
+exercise a deliberately failing arithmetic test and its approved repair, runtime
+isolation (non-root, no network, read-only root, dropped capabilities,
+no-new-privileges, CPU/memory/PID limits), bounded output, timeout, cleanup, and
+snapshot immutability. They do not download packages or run public repositories.
+Fake-adapter unit tests remain separate and do not count as Docker integration
+coverage. If Docker is unavailable, the explicit suite skips; if the pinned image
+is missing, it fails with a pull instruction. It never substitutes fake execution.
 
 To inspect the built frontend, run `npm run preview` in `frontend/` and open
 http://127.0.0.1:4173 with the backend still running. Preview includes the local

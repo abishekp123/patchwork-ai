@@ -26,6 +26,7 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+markers = ["docker_integration: explicitly invoked tests that execute trusted fixtures in real Docker"]
 
 [tool.ruff]
 target-version = "py312"

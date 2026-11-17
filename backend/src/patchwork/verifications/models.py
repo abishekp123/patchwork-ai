@@ -9,10 +9,12 @@ class SandboxConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     mode: Literal["fake", "docker"] = "fake"
-    image: str = "python:3.12-slim"
+    image: str = "python@sha256:593bd06efe90efa80dc4eee3948be7c0fde4134606dd40d8dd8dbcade98e669c"
     memory_mb: int = Field(default=512, ge=64, le=4096)
     cpus: float = Field(default=1.0, ge=0.25, le=8.0)
+    pids_limit: int = Field(default=64, ge=16, le=512)
     timeout_seconds: int = Field(default=30, ge=1, le=600)
+    output_limit_bytes: int = Field(default=200_000, ge=1024, le=2_000_000)
     network_disabled: bool = True
     read_only_root: bool = True
     no_new_privileges: bool = True

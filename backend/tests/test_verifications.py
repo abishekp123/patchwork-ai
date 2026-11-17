@@ -8,10 +8,10 @@ from patchwork.database import initialize_database
 from patchwork.errors import PatchworkError
 from patchwork.ingestion.discovery import SourceFile
 from patchwork.intelligence.models import Import, ParsedFile, Symbol
-from patchwork.patches.engine import PatchChange, PatchProposal
+from patchwork.patches.engine import PatchChange, PatchGenerator, PatchProposal
 from patchwork.patches.store import PatchStore
 from patchwork.repositories.store import RepositoryStore
-from patchwork.verifications.engine import run_verification
+from patchwork.verifications.engine import _apply_patch_to_snapshot, run_verification
 from patchwork.verifications.models import SandboxConfig
 from patchwork.verifications.sandbox import FakeSandboxAdapter, SandboxAdapter, SandboxFactory
 from patchwork.verifications.store import VerificationStore
@@ -81,7 +81,7 @@ def test_sandbox_factory_dispatches_modes():
     assert isinstance(SandboxFactory.create("docker"), SandboxAdapter)
 
 
-def test_sandbox_policy_rejects_unsafe_configuration():
+def test_sandbox_policy_rejects_unsafe_configuration(tmp_path: Path):
     config = SandboxConfig(
         mode="docker",
         network_disabled=False,
@@ -103,6 +103,58 @@ def test_sandbox_policy_rejects_unsafe_configuration():
     root_user = SandboxConfig(mode="docker", user="0:0")
     with pytest.raises(PatchworkError, match="non-root"):
         SandboxAdapter(root_user).validate_policy()
+
+    unpinned_image = SandboxConfig(
+        mode="docker",
+        image="python:3.12-slim",
+        trusted_roots=["/tmp"],
+    )
+    with pytest.raises(PatchworkError, match="pinned by SHA-256"):
+        SandboxAdapter(unpinned_image).validate_policy()
+
+    unsafe_workdir = SandboxConfig(
+        mode="docker",
+        workdir="/workspace,ro",
+        trusted_roots=[str(tmp_path)],
+    )
+    with pytest.raises(PatchworkError, match="fixed /workspace"):
+        SandboxAdapter(unsafe_workdir).validate_policy()
+
+    comma_workspace = tmp_path / "workspace,ro=true"
+    comma_workspace.mkdir()
+    trusted_adapter = SandboxAdapter(SandboxConfig(mode="docker", trusted_roots=[str(tmp_path)]))
+    with pytest.raises(PatchworkError, match="mount separators"):
+        trusted_adapter._trusted_workspace(comma_workspace)
+
+
+def test_generated_unified_diff_is_applied_to_snapshot(tmp_path: Path):
+    source = "def add(left, right):\n    return left - right\n"
+    repaired = "def add(left, right):\n    return left + right\n"
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    target = snapshot / "calculator.py"
+    target.write_text(source, encoding="utf-8")
+    diff = PatchGenerator.build_diff("calculator.py", source, repaired)
+
+    _apply_patch_to_snapshot(snapshot, diff)
+
+    assert target.read_text(encoding="utf-8") == repaired
+
+
+def test_generated_unified_diff_rejects_stale_snapshot(tmp_path: Path):
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    target = snapshot / "calculator.py"
+    target.write_text("def add(left, right):\n    return left * right\n", encoding="utf-8")
+    diff = PatchGenerator.build_diff(
+        "calculator.py",
+        "def add(left, right):\n    return left - right\n",
+        "def add(left, right):\n    return left + right\n",
+    )
+
+    with pytest.raises(PatchworkError, match="does not match the indexed source"):
+        _apply_patch_to_snapshot(snapshot, diff)
+    assert target.read_text(encoding="utf-8") == "def add(left, right):\n    return left * right\n"
 
 
 def test_docker_adapter_reports_unavailable_when_not_installed(monkeypatch):
