@@ -36,7 +36,7 @@ def require_real_docker(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("PATH", f"{bundled_cli}{os.pathsep}{current_path}")
     docker = shutil.which("docker")
     if docker is None:
-        pytest.skip("Docker CLI is not installed.")
+        pytest.fail("Docker CLI is required when integration tests are explicitly enabled.")
     engine = subprocess.run(
         [docker, "info", "--format", "{{.OSType}}/{{.Architecture}}"],
         capture_output=True,
@@ -45,7 +45,9 @@ def require_real_docker(monkeypatch: pytest.MonkeyPatch) -> None:
         check=False,
     )
     if engine.returncode != 0:
-        pytest.skip("Docker Engine is unavailable.")
+        pytest.fail("Docker Engine is required when integration tests are explicitly enabled.")
+    platform = engine.stdout.strip().replace("aarch64", "arm64").replace("x86_64", "amd64")
+    assert platform in {"linux/amd64", "linux/arm64"}
     image = subprocess.run(
         [docker, "image", "inspect", DOCKER_IMAGE, "--format", "{{.Os}}/{{.Architecture}}"],
         capture_output=True,
@@ -55,9 +57,9 @@ def require_real_docker(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     assert image.returncode == 0, (
         "Pull the pinned fixture image outside the sandbox first: "
-        f"docker pull --platform linux/arm64 {DOCKER_IMAGE}"
+        f"docker pull --platform {platform} {DOCKER_IMAGE}"
     )
-    assert image.stdout.strip() == "linux/arm64"
+    assert image.stdout.strip() == platform
 
 
 def _manifest() -> dict[str, object]:
@@ -77,7 +79,7 @@ def _manifest() -> dict[str, object]:
         assert candidate.resolve().is_relative_to(FIXTURE_ROOT.resolve())
         assert hashlib.sha256(candidate.read_bytes()).hexdigest() == expected_hash
     assert manifest["image"] == DOCKER_IMAGE
-    assert manifest["platform"] == "linux/arm64"
+    assert manifest["platforms"] == ["linux/amd64", "linux/arm64"]
     return manifest
 
 

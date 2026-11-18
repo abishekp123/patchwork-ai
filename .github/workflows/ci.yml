@@ -49,3 +49,37 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
       - run: npm run check
+
+  docker-integration:
+    name: Real Docker / Linux amd64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      PATCHWORK_RUN_DOCKER_INTEGRATION: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.lock
+      - run: python -m pip install -r requirements-dev.lock
+      - run: python -m pip install --no-deps -e .
+      - name: Prepare pinned multi-platform image
+        run: |
+          docker info
+          docker pull --platform linux/amd64 python@sha256:593bd06efe90efa80dc4eee3948be7c0fde4134606dd40d8dd8dbcade98e669c
+      - name: Execute real sandbox tests
+        run: pytest -m docker_integration tests/test_docker_integration.py --junitxml=docker-results.xml
+      - name: Require executed tests without skips
+        if: always()
+        run: |
+          python - <<'PYCODE'
+          import xml.etree.ElementTree as ET
+          cases = ET.parse("docker-results.xml").getroot().findall(".//testcase")
+          assert len(cases) >= 2, "Real Docker tests were not collected"
+          assert all(not any(case.find(tag) is not None for tag in ("skipped", "failure", "error")) for case in cases), "Docker tests failed or skipped"
+          PYCODE
