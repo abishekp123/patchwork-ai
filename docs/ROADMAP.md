@@ -17,7 +17,11 @@
 6. **Integrated developer workspace — implemented.** Repository browsing/search,
    investigation-to-patch workflow, persisted activity dashboard, request
    correlation, and an offline fake-provider workflow evaluation.
-7. **Production hardening — future.** Authentication/authorization, durable
+7. **Verification hardening — implemented and locally checked.** Docker-only
+   runtime boundary, native amd64 Docker CI, protected repair fixtures, live AI
+   evaluation harness, and corrected Vite API routing. Real AI evaluation remains
+   NOT RUN without credentials; browser automation was unavailable in this session.
+8. **Production hardening — future.** Authentication/authorization, durable
    external workers, global quotas, automated snapshot collection, managed
    telemetry, deployment, and broader measured model-quality evaluation.
 

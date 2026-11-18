@@ -1,0 +1,78 @@
+{
+  "approval_policy": "Explicit --approve-fixtures consent: isolated built-in evaluation fixtures only.",
+  "cases": [
+    {
+      "approved": false,
+      "docker_tested": false,
+      "error_code": "prerequisite_unavailable",
+      "fixture": "arithmetic",
+      "generated": false,
+      "outcome": "NOT_RUN",
+      "successful_repair": false,
+      "validated": false
+    },
+    {
+      "approved": false,
+      "docker_tested": false,
+      "error_code": "prerequisite_unavailable",
+      "fixture": "off_by_one",
+      "generated": false,
+      "outcome": "NOT_RUN",
+      "successful_repair": false,
+      "validated": false
+    },
+    {
+      "approved": false,
+      "docker_tested": false,
+      "error_code": "prerequisite_unavailable",
+      "fixture": "boolean",
+      "generated": false,
+      "outcome": "NOT_RUN",
+      "successful_repair": false,
+      "validated": false
+    },
+    {
+      "approved": false,
+      "docker_tested": false,
+      "error_code": "prerequisite_unavailable",
+      "fixture": "dictionary",
+      "generated": false,
+      "outcome": "NOT_RUN",
+      "successful_repair": false,
+      "validated": false
+    },
+    {
+      "approved": false,
+      "docker_tested": false,
+      "error_code": "prerequisite_unavailable",
+      "fixture": "conversion",
+      "generated": false,
+      "outcome": "NOT_RUN",
+      "successful_repair": false,
+      "validated": false
+    }
+  ],
+  "created_at": "2026-11-18T02:51:56.193943+00:00",
+  "limits": {
+    "calls_per_case": 8,
+    "case_seconds": 180,
+    "sandbox_seconds": 20,
+    "total_calls": 40,
+    "total_reserved_tokens": 600000,
+    "total_seconds": 900
+  },
+  "model": "gpt-4.1-mini",
+  "provider": "OpenAI Responses API",
+  "reason": "OPENAI_API_KEY unavailable; no inference or Docker evaluation performed.",
+  "status": "NOT_RUN",
+  "successful_repairs": 0,
+  "suite": "real-ai-repair-v1",
+  "usage": {
+    "actual_input_tokens": 0,
+    "actual_output_tokens": 0,
+    "http_attempt_limit": 0,
+    "logical_calls": 0,
+    "reserved_tokens_estimate": 0,
+    "usage_complete": true
+  }
+}

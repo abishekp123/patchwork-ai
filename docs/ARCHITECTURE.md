@@ -13,8 +13,9 @@ Offline evaluation CLI → fake provider → investigation → validated patch �
 ```
 
 - `api/` and `schemas/`: HTTP validation, response contracts, and consistent error
-  envelopes. `/api/repositories` is canonical; unprefixed aliases support Vite's
-  existing prefix-removing proxy. The frontend and `/health` contract are unchanged.
+  envelopes. `/api/*` is canonical. Vite preserves that prefix except for
+  `/api/health`, which maps to the existing `/health` endpoint. Legacy unprefixed
+  repository aliases remain compatible.
 - `ingestion/`: accepts only public HTTPS GitHub URLs and full SHA-1 commits;
   resolves HEAD when omitted. Fetches depth-one bare snapshots, checks the fetched
   commit, and reads tree/blob objects without checkout. No imported Python is run.
@@ -37,7 +38,11 @@ Offline evaluation CLI → fake provider → investigation → validated patch �
 - `verifications/`: persist the run lifecycle and baseline/patched summaries.
   Docker mode runs the same allowlisted command in separate containers over
   independent temporary snapshots. Fake mode is for deterministic unit tests
-  only and is not a Docker execution substitute.
+  only through direct dependency injection; HTTP and environment configuration
+  accept only Docker. Readiness checks the daemon and locally cached pinned image.
+  Blocking Docker work runs in bounded threads; cancellation/shutdown awaits
+  container cleanup before removing mounted snapshots. Preparation failures persist
+  FAILED; infrastructure errors compare as INCONCLUSIVE.
 - `api/verifications.py` and `frontend/src/api/verifications.ts`: typed routes and
   clients expose creation, status/results, cancellation, and sandbox availability.
   The patch review UI polls persisted status and renders backend-reported outcomes.
@@ -47,7 +52,11 @@ Offline evaluation CLI → fake provider → investigation → validated patch �
 - `evaluations/`: an offline deterministic command drives a fake-provider
   investigation through evidence validation, patch generation, persistence, and
   approval. It is an evaluation fixture, not a live-provider substitute or a
-  repository-code execution path.
+  repository-code execution path. `evaluations/live.py` separately uses the real
+  provider and existing investigation, patch, approval, and Docker services. Five
+  standard-library fixtures have protected test files, one patch attempt each,
+  shared call/token/time budgets, and checkpointed JSON/Markdown outcomes. See
+  [EVALUATION](EVALUATION.md) for the explicit fixture approval policy.
 - `api/observability.py`: correlates requests with validated request IDs, returns
   the ID in response headers/error envelopes, and logs route templates and
   durations without query strings.
@@ -95,7 +104,7 @@ timeouts, and bounded captured output. Only a disposable indexed snapshot and a
 temporary runner script are mounted; the repository root and Docker socket are
 not mounted. Timed-out containers are explicitly removed and cleanup is checked.
 The host process prepares and deletes snapshot directories but does not execute
-their Python code. The optional real-Docker test suite runs only hash-allowlisted,
+their Python code. The opt-in real-Docker test suite runs only controlled,
 locally authored fixtures and is excluded from normal CI.
 
 Containers still share the Docker daemon and host kernel; this is not a VM-level
@@ -113,3 +122,9 @@ Request correlation and local request logging are implemented, but are not a
 replacement for managed production telemetry. Model-based patch/investigation
 quality still needs a larger versioned evaluation corpus; the current end-to-end
 evaluation is deterministic and uses fake providers.
+
+
+Native Linux mounts use readable snapshot/runner children beneath mode-0700 host
+parents. Only children are mounted; the runner mount is read-only and Docker
+container-ID bookkeeping remains host-private. This avoids relying on Docker
+Desktop permission translation while retaining the numeric non-root identity.

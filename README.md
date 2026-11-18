@@ -89,7 +89,8 @@ To enable the review UI's runtime verification action, configure
 `PATCHWORK_SANDBOX_MODE=docker`, ensure Docker is available, and pre-pull the
 pinned sandbox image described in the Docker integration section. Requests
 default to Docker execution; the API does not silently substitute fake results.
-The fake adapter is reserved for explicitly selected deterministic tests.
+Fake mode is rejected by HTTP requests and environment configuration. Test code
+can inject a fake adapter directly; historical simulated results are labeled in the UI.
 
 If the dashboard cannot connect, check the backend terminal and direct health
 URL, then the proxy target. An invalid database prevents startup; a database
@@ -174,11 +175,11 @@ quality or real sandbox execution.
 
 The normal backend suite does not start Docker. To run the separate real-container
 checks, first ensure Docker Desktop/Engine is running and pull the pinned,
-multi-architecture image outside the sandbox (the fixture suite runs its ARM64
-variant on Apple Silicon):
+multi-architecture image outside the sandbox (native amd64 on Linux CI, arm64
+on Apple Silicon):
 
 ```sh
-docker pull --platform linux/arm64 \
+docker pull \
   python@sha256:593bd06efe90efa80dc4eee3948be7c0fde4134606dd40d8dd8dbcade98e669c
 cd backend
 PATCHWORK_RUN_DOCKER_INTEGRATION=1 \
@@ -197,8 +198,32 @@ isolation (non-root, no network, read-only root, dropped capabilities,
 no-new-privileges, CPU/memory/PID limits), bounded output, timeout, cleanup, and
 snapshot immutability. They do not download packages or run public repositories.
 Fake-adapter unit tests remain separate and do not count as Docker integration
-coverage. If Docker is unavailable, the explicit suite skips; if the pinned image
-is missing, it fails with a pull instruction. It never substitutes fake execution.
+coverage. Explicitly enabling the suite makes missing Docker/image prerequisites
+a failure, not a skip. The dedicated Linux amd64 CI job requires at least eight
+executed tests and zero skips. The suite also checks five repair fixture oracles
+and the HTTP approval/verification/restart flow. It never substitutes fake execution.
+
+### Opt-in real AI repair evaluation
+
+This is separate from the offline evaluation and Docker oracle tests. With
+`OPENAI_API_KEY` exported and Docker/image ready, from `backend/`:
+
+```sh
+.venv/bin/python -m patchwork.evaluations.live --live --approve-fixtures \
+  --output-dir /tmp/patchwork-live-run
+```
+
+Use a fresh output directory. The approval flag authorizes only the five built-in
+fixtures after deterministic patch/evidence validation. JSON, Markdown, and SQLite
+traces distinguish generated, validated, approved, Docker-tested, and successful
+repairs. No key means **NOT_RUN**, never fake success. The CLI does not load `.env`;
+credentials must be in the process environment. See [evaluation policy and
+limits](docs/EVALUATION.md). Live model quality has not yet been measured.
+
+The pinned image contains Python's standard library, not pytest or third-party
+project dependencies. The allowlisted fixture `unittest` command is validated;
+generic pytest verification requires a separately reviewed dependency-image
+strategy. The sandbox never installs packages or enables networking automatically.
 
 To inspect the built frontend, run `npm run preview` in `frontend/` and open
 http://127.0.0.1:4173 with the backend still running. Preview includes the local

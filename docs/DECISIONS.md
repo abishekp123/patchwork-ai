@@ -43,3 +43,24 @@
 References: [Git fetch](https://git-scm.com/docs/git-fetch),
 [Git transport configuration](https://git-scm.com/docs/git-config), and
 [Tree-sitter Python bindings](https://tree-sitter.github.io/py-tree-sitter/).
+
+
+## Verification hardening (2026-11-17)
+
+- Runtime configuration and requests accept Docker only. Test substitution uses
+  explicit dependency injection, never a user-visible simulation switch.
+- Keep the existing multi-platform image digest. Pull on the host; run containers
+  with `--pull=never` and network disabled. CI requires executed amd64 tests and
+  zero skips; Apple Silicon validates the native arm64 variant locally.
+- Use five tiny standard-library repair fixtures so Docker evaluation needs no
+  package downloads. Protect tests from proposed edits; count success only when
+  the failing baseline and passing patched suite both run the expected tests.
+- Separate fake workflow checks, known-repair Docker oracles, and real AI quality
+  evaluation. Only the last uses paid inference; missing credentials produce
+  NOT_RUN. No quality or performance percentages are inferred from oracle tests.
+- Preserve `/api` through Vite except for health. Regression tests cover canonical
+  routes; API-driven integration checks cover approval, Docker, and persistence.
+
+- Native Linux requires the container UID to traverse the mounted directory.
+  Keep a private mode-0700 parent and mount only readable disposable children;
+  never solve permissions by running containers as root or weakening isolation.

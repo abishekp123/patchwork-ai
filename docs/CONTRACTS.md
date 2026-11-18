@@ -150,13 +150,27 @@ there is no durable task queue or automatic resume.
 Only approved patches tied to the same ready repository snapshot can be run.
 Baseline and patched versions use independent snapshots and the same allowlisted
 command. Docker is the runtime default and fails closed on unavailable or unsafe
-configuration; fake mode must be explicitly selected for deterministic tests.
+configuration. `sandbox_mode` accepts only `"docker"`; `"fake"` returns 422.
+The application setting also accepts only Docker. Fake adapters require explicit
+in-process test injection and cannot be enabled by API callers. Readiness checks
+the daemon and pinned image; unavailable runtime verification returns 503 before
+creating a run. Unsupported or unequal commands return 422 before creating a run.
 Concurrent active verification requests for one patch return 409. Results are
-classified as `IMPROVED`, `REGRESSED`, `UNCHANGED`, `FAILED`, or
-`SANDBOX_UNAVAILABLE` according to backend summaries. The frontend displays
+classified as `IMPROVED`, `REGRESSED`, `UNCHANGED`, `FAILED`, or `INCONCLUSIVE` according to
+backend summaries. Timeouts/infrastructure errors are INCONCLUSIVE, never an
+improvement. UNCHANGED means both commands passed, not that a repair was proved.
+`SANDBOX_UNAVAILABLE` remains a response enum for compatibility. The frontend displays
 persisted backend responses rather than synthesizing progress or test outcomes.
 
 The offline command `.venv/bin/python -m patchwork.evaluations` exercises the
 investigation-to-approval path with deterministic fake responses and temporary
 storage. It does not call an external provider, execute indexed code, or perform
 Docker verification.
+
+
+Verification cancellation and graceful shutdown wait for bounded Docker worker
+cleanup; they do not abandon a mounted snapshot. Cancellation can therefore take
+up to the current command timeout plus Docker cleanup grace. Historical fake-mode
+records remain readable and are explicitly labeled simulated by the review UI.
+The opt-in live evaluation is a CLI, not a new public API; its consent, budgets,
+and report schema are documented in [EVALUATION](EVALUATION.md).
