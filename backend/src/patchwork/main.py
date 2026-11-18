@@ -1,5 +1,6 @@
 """Application assembly. Run with `uvicorn patchwork.main:create_app --factory`."""
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -24,7 +25,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         initialize_database(resolved_settings.database_path)
-        yield
+        try:
+            yield
+        finally:
+            tasks = [
+                *app.state.verification_tasks.values(),
+                *app.state.investigation_tasks.values(),
+            ]
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     app = FastAPI(title="Patchwork AI", version=__version__, lifespan=lifespan)
     app.state.settings = resolved_settings

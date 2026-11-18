@@ -223,6 +223,20 @@ def _validate_command(command: str) -> str:
     )
 
 
+async def _run_sandbox(sandbox: SandboxAdapter, **kwargs):
+    # Keep the API responsive. On cancellation, the bounded worker must finish Docker
+    # cleanup before its mounted directories are removed; never abandon the thread.
+    worker = asyncio.create_task(asyncio.to_thread(sandbox.run, **kwargs))
+    try:
+        return await asyncio.shield(worker)
+    except asyncio.CancelledError:
+        try:
+            await asyncio.shield(worker)
+        except Exception:
+            pass
+        raise
+
+
 async def run_verification(
     settings: Settings,
     patch_id: str,
@@ -290,7 +304,8 @@ async def run_verification(
             updated_at=timestamp(),
             started_at=timestamp(),
         )
-        baseline_summary, baseline_stdout, baseline_stderr = sandbox.run(
+        baseline_summary, baseline_stdout, baseline_stderr = await _run_sandbox(
+            sandbox,
             command=baseline_command,
             workspace=baseline_dir,
             timeout_seconds=int(settings.verification_timeout_seconds),
@@ -302,7 +317,8 @@ async def run_verification(
             baseline_summary=baseline_summary,
             execution_logs=[baseline_stdout, baseline_stderr],
         )
-        patched_summary, patched_stdout, patched_stderr = sandbox.run(
+        patched_summary, patched_stdout, patched_stderr = await _run_sandbox(
+            sandbox,
             command=patched_command,
             workspace=patched_dir,
             timeout_seconds=int(settings.verification_timeout_seconds),

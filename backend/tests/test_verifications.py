@@ -302,3 +302,39 @@ def test_docker_readiness_checks_daemon_and_image(monkeypatch, failure):
     monkeypatch.setattr("patchwork.verifications.sandbox.subprocess.run", run)
     assert not SandboxAdapter().available()
     assert len(calls) == (2 if failure == "image" else 1)
+
+
+def test_cancel_waits_for_bounded_sandbox_cleanup(tmp_path):
+    import threading
+
+    from patchwork.verifications.engine import _run_sandbox
+
+    started, release, cleaned = threading.Event(), threading.Event(), threading.Event()
+
+    class ControlledSandbox(FakeSandboxAdapter):
+        def run(self, **kwargs):
+            started.set()
+            assert release.wait(2)
+            assert tmp_path.exists()
+            cleaned.set()
+            return super().run(**kwargs)
+
+    async def exercise():
+        task = asyncio.create_task(
+            _run_sandbox(
+                ControlledSandbox(),
+                command="python -m pytest -q",
+                workspace=tmp_path,
+                timeout_seconds=1,
+            )
+        )
+        assert await asyncio.to_thread(started.wait, 2)
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert cleaned.is_set()
+
+    asyncio.run(exercise())

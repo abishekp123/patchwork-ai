@@ -8,9 +8,12 @@ import time
 from pathlib import Path
 
 import pytest
+from test_live_evaluation import REPAIRS
 
 from patchwork.config import Settings
 from patchwork.database import connect_database, initialize_database
+from patchwork.evaluations.fixtures import FIXTURES
+from patchwork.evaluations.live import index_fixture, successful_repair
 from patchwork.ingestion.discovery import SourceFile
 from patchwork.intelligence.python import parse_python
 from patchwork.patches.engine import PatchChange, PatchProposal
@@ -258,3 +261,45 @@ def test_real_docker_timeout_is_bounded_and_container_is_removed(tmp_path: Path)
     assert elapsed < 20
     assert "Timeout" in stderr or "timeout" in stderr.lower()
     assert _tracked_containers() == before_containers
+
+
+@pytest.mark.parametrize("fixture", FIXTURES, ids=lambda fixture: fixture.name)
+def test_live_evaluation_oracles_in_real_docker(tmp_path: Path, fixture):
+    """Validate dataset tests using known repairs, not model-generated repairs."""
+    settings = Settings(
+        database_path=tmp_path / "evaluation.db",
+        repository_dir=tmp_path / "repos",
+        verification_timeout_seconds=20,
+        verification_output_limit_bytes=8192,
+    )
+    initialize_database(settings.database_path)
+    repository = index_fixture(settings, fixture)
+    proposal = PatchProposal(
+        title="Known evaluation oracle",
+        summary="Dataset validation only",
+        changes=[
+            PatchChange(
+                path="subject.py",
+                before=fixture.source,
+                after=REPAIRS[fixture.name],
+                reason="Known oracle",
+            )
+        ],
+    )
+    patch = PatchStore(settings.database_path).create(repository, proposal)
+    PatchStore(settings.database_path).transition(
+        patch.id, "approved", reviewer="fixture-test", reason="Known built-in fixture oracle"
+    )
+    before = _tracked_containers()
+    record = asyncio.run(
+        run_verification(
+            settings,
+            patch.id,
+            repository_id=repository.id,
+            commit_sha=repository.commit_sha,
+            baseline_command="python -m unittest discover -v -p 'fixture_test_*.py'",
+            patched_command="python -m unittest discover -v -p 'fixture_test_*.py'",
+        )
+    )
+    assert successful_repair(record, len(fixture.assertions)), record.model_dump()
+    assert _tracked_containers() == before

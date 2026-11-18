@@ -82,7 +82,7 @@ async def create_verification_for_patch(
 
     payload = body or VerificationRequest()
     sandbox.validate_policy()
-    if not sandbox.available():
+    if not await asyncio.to_thread(sandbox.available):
         raise PatchworkError(
             "sandbox_unavailable", "Docker daemon or pinned image unavailable.", 503
         )
