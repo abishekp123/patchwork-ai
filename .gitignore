@@ -33,3 +33,8 @@ data/
 .idea/
 .vscode/
 *.log
+
+# Browser run artifacts and runtime locks
+playwright-report/
+test-results/
+*.runtime.lock

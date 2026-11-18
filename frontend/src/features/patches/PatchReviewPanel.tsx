@@ -342,6 +342,26 @@ export function PatchReviewPanel({
                           : 'SIMULATED — not Docker verified'}
                       </span>
                     </div>
+                    {latestVerification.error_code && (
+                      <p role="status" className="mt-2 text-sm text-rose-800">
+                        {latestVerification.error_code === 'interrupted'
+                          ? 'Interrupted by a server restart. Verify again to retry after cleanup.'
+                          : `Verification stopped: ${latestVerification.error_code}`}
+                      </p>
+                    )}
+                    {latestVerification &&
+                      !['COMPLETED', 'FAILED', 'CANCELLED'].includes(
+                        latestVerification.status,
+                      ) && (
+                        <button
+                          type="button"
+                          onClick={() => void cancel(latestVerification.id)}
+                          disabled={inFlightId === latestVerification.id}
+                          className="mt-3 rounded-lg border border-rose-300 bg-white px-3 py-1.5 text-xs font-medium text-rose-800 disabled:opacity-50"
+                        >
+                          Cancel verification
+                        </button>
+                      )}
                     {latestVerification.sandbox_mode === 'docker' &&
                       (latestVerification.baseline_summary ||
                         latestVerification.patched_summary) && (
@@ -389,21 +409,6 @@ export function PatchReviewPanel({
                               </pre>
                             </details>
                           )}
-                          {latestVerification &&
-                            !['COMPLETED', 'FAILED', 'CANCELLED'].includes(
-                              latestVerification.status,
-                            ) && (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  void cancel(latestVerification.id)
-                                }
-                                disabled={inFlightId === latestVerification.id}
-                                className="mt-3 rounded-lg border border-rose-300 bg-white px-3 py-1.5 text-xs font-medium text-rose-800 disabled:opacity-50"
-                              >
-                                Cancel verification
-                              </button>
-                            )}
                         </div>
                       )}
                   </div>

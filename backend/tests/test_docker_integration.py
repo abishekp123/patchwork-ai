@@ -382,14 +382,18 @@ def test_restart_removes_owned_orphan_container_and_mounts(settings):
     # Trusted test launcher is killed while a controlled container is running.
     # No repository code runs on the host, and unrelated owners are never targeted.
     code = """
-import subprocess,sys,time
+import json,subprocess,sys,time
 from pathlib import Path
 from patchwork.runtime import application_owner,resource_root,owner_id
 from patchwork.database import initialize_database
+from patchwork.verifications.store import VerificationStore
 from patchwork.verifications.models import SandboxConfig
 path=Path(sys.argv[1])
 with application_owner(path):
     initialize_database(path)
+    store=VerificationStore(path)
+    record=store.create(patch_id=sys.argv[2],repository_id=sys.argv[3],commit_sha=sys.argv[4],sandbox_mode='docker')
+    store.update(record.id,status='RUNNING_BASELINE')
     (resource_root(path)/'job-orphan').mkdir()
     result=subprocess.run(['docker','run','-d','--rm','--pull=never','--network=none',
         '--read-only','--cap-drop=ALL','--security-opt','no-new-privileges:true',
@@ -397,20 +401,33 @@ with application_owner(path):
         '--label','com.patchwork.verification=true','--label','com.patchwork.owner='+owner_id(path),
         SandboxConfig().image,'python','-c','import time; time.sleep(60)'],
         check=True,capture_output=True,text=True)
-    print(result.stdout.strip(),flush=True)
+    print(json.dumps([result.stdout.strip(),record.id]),flush=True)
     time.sleep(60)
 """
+    repository, patch = _approved_fixture_patch(settings, _manifest())
     process = subprocess.Popen(
-        [sys.executable, "-c", code, str(settings.database_path)], stdout=subprocess.PIPE, text=True
+        [
+            sys.executable,
+            "-c",
+            code,
+            str(settings.database_path),
+            patch.id,
+            repository.id,
+            repository.commit_sha,
+        ],
+        stdout=subprocess.PIPE,
+        text=True,
     )
     container = ""
     try:
-        container = process.stdout.readline().strip()
+        container, verification_id = json.loads(process.stdout.readline())
         assert len(container) == 64
         process.kill()
         process.wait(timeout=5)
         with TestClient(create_app(settings)) as client:
             assert client.get("/health").status_code == 200
+            recovered = client.get(f"/api/verifications/{verification_id}").json()["verification"]
+            assert recovered["status"] == "FAILED" and recovered["error_code"] == "interrupted"
         assert not list(resource_root(settings.database_path).iterdir())
         listing = subprocess.check_output(
             [

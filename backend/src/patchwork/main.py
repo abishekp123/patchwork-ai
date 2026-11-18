@@ -1,6 +1,8 @@
 """Application assembly. Run with `uvicorn patchwork.main:create_app --factory`."""
 
 import asyncio
+import logging
+import sqlite3
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -40,7 +42,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     if not task.cancelling():
                         task.cancel()
                 await asyncio.gather(*tasks, return_exceptions=True)
-                reconcile(resolved_settings.database_path, cancelled=True)
+                try:
+                    reconcile(resolved_settings.database_path, cancelled=True)
+                except sqlite3.Error:
+                    # Storage may have failed while serving. Do not mask graceful
+                    # resource cleanup; startup will reconcile after storage is restored.
+                    logging.getLogger(__name__).error(
+                        "Shutdown state could not be persisted; restore SQLite before restart."
+                    )
 
     app = FastAPI(title="Patchwork AI", version=__version__, lifespan=lifespan)
     app.state.settings = resolved_settings

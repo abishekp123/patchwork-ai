@@ -644,7 +644,10 @@ export function DeveloperWorkspace({
                 <div className="border-b border-stone-100 px-4 py-3">
                   <p className="text-xs font-semibold text-stone-600">Files</p>
                 </div>
-                <div className="max-h-[420px] overflow-auto p-2" role="list">
+                <nav
+                  className="max-h-[420px] overflow-auto p-2"
+                  aria-label="Indexed files"
+                >
                   {loadingRepositories && (
                     <p className="px-2 py-3 text-xs text-stone-500">
                       Loading repositories…
@@ -659,7 +662,6 @@ export function DeveloperWorkspace({
                     <button
                       key={file.path}
                       type="button"
-                      role="listitem"
                       onClick={() => {
                         setSourceError(null)
                         setSelectedPath(file.path)
@@ -678,7 +680,7 @@ export function DeveloperWorkspace({
                       {file.path}
                     </button>
                   ))}
-                </div>
+                </nav>
                 <div className="flex items-center justify-between border-t border-stone-100 px-3 py-2 text-[10px] text-stone-500">
                   <button
                     type="button"
@@ -973,7 +975,9 @@ export function DeveloperWorkspace({
                 )}
                 {currentInvestigation.error_code && (
                   <p className="rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-800">
-                    Stopped: {currentInvestigation.error_code}
+                    {currentInvestigation.error_code === 'interrupted'
+                      ? 'Interrupted by a server restart. Submit the investigation again to retry; it was not resumed automatically.'
+                      : `Stopped: ${currentInvestigation.error_code}`}
                   </p>
                 )}
                 {report?.summary && (

@@ -72,6 +72,10 @@ jobs:
         run: |
           docker info
           docker pull --platform linux/amd64 python@sha256:593bd06efe90efa80dc4eee3948be7c0fde4134606dd40d8dd8dbcade98e669c
+      - name: Build reviewed dependency environment
+        run: |
+          python ../scripts/build_verification_image.py > image-build.log
+          echo "PATCHWORK_TEST_IMAGE=$(tail -n 1 image-build.log)" >> "$GITHUB_ENV"
       - name: Execute real sandbox tests
         run: pytest -m docker_integration tests/test_docker_integration.py --junitxml=docker-results.xml
       - name: Require executed tests without skips
@@ -80,6 +84,21 @@ jobs:
           python - <<'PYCODE'
           import xml.etree.ElementTree as ET
           cases = ET.parse("docker-results.xml").getroot().findall(".//testcase")
-          assert len(cases) >= 8, "Real Docker tests were not collected"
+          assert len(cases) >= 10, "Real Docker tests were not collected"
           assert all(not any(case.find(tag) is not None for tag in ("skipped", "failure", "error")) for case in cases), "Docker tests failed or skipped"
           PYCODE
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npx playwright install --with-deps chromium webkit
+        working-directory: frontend
+      - name: Browser workflows against real API and Docker
+        working-directory: frontend
+        env:
+          PATCHWORK_TEST_PYTHON: python
+        run: PATCHWORK_VERIFICATION_IMAGE="$PATCHWORK_TEST_IMAGE" npm run test:browser
