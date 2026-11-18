@@ -429,3 +429,73 @@ with application_owner(path):
             process.wait(timeout=5)
         if container:
             subprocess.run(["docker", "rm", "-f", container], capture_output=True, timeout=10)
+
+
+def test_trusted_pytest_environment_runs_project_dependency(tmp_path):
+    image = os.environ.get("PATCHWORK_TEST_IMAGE")
+    assert image, "Build scripts/build_verification_image.py and set PATCHWORK_TEST_IMAGE"
+    settings = Settings(
+        database_path=tmp_path / "pytest.db",
+        repository_dir=tmp_path / "repos",
+        verification_image=image,
+        verification_timeout_seconds=20,
+    )
+    initialize_database(settings.database_path)
+    from patchwork.evaluations.fixtures import RepairFixture
+
+    fixture = RepairFixture(
+        "dependency", "Add two numbers", FIXTURES[0].source, ("self.assertEqual(repair(2, 3), 5)",)
+    )
+    files = {
+        "subject.py": fixture.source,
+        "test_repair.py": fixture.files["fixture_test_repair.py"],
+        "test_dependency.py": "from packaging.version import Version\n"
+        "def test_versions():\n    assert Version('1.10') > Version('1.2')\n",
+    }
+    store = RepositoryStore(settings.database_path)
+    repository, lease = store.claim("fixture://dependency-test", "f" * 40, 30)
+    parsed = [
+        parse_python(
+            SourceFile(
+                path=path,
+                source=source,
+                encoding="utf-8",
+                content_hash=hashlib.sha256(source.encode()).hexdigest(),
+                size_bytes=len(source),
+            ),
+            deadline=time.monotonic() + 5,
+            max_symbols=100,
+        )
+        for path, source in files.items()
+    ]
+    repository = store.publish(repository.id, lease, parsed, {}, "fixture.git")
+    patch = PatchStore(settings.database_path).create(
+        repository,
+        PatchProposal(
+            title="Dependency fixture",
+            summary="Known repair",
+            changes=[
+                PatchChange(
+                    path="subject.py",
+                    before=fixture.source,
+                    after=REPAIRS["arithmetic"],
+                    reason="Fixture",
+                )
+            ],
+        ),
+    )
+    PatchStore(settings.database_path).transition(
+        patch.id, "approved", reviewer="fixture", reason="Controlled test"
+    )
+    record = asyncio.run(
+        run_verification(
+            settings,
+            patch.id,
+            repository_id=repository.id,
+            commit_sha=repository.commit_sha,
+            baseline_command="python -m pytest -q",
+            patched_command="python -m pytest -q",
+        )
+    )
+    assert record.environment_image == image
+    assert successful_repair(record, 2), record.model_dump()

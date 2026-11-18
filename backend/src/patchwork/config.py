@@ -23,6 +23,10 @@ class Settings(BaseModel):
     verification_output_limit_bytes: int = Field(default=200_000, gt=0, le=2_000_000)
     verification_trusted_roots: list[str] = Field(default_factory=list)
     sandbox_mode: Literal["docker"] = "docker"
+    verification_image: str = Field(
+        default="python@sha256:593bd06efe90efa80dc4eee3948be7c0fde4134606dd40d8dd8dbcade98e669c",
+        pattern=r"^(?:[a-z0-9./:_-]+@)?sha256:[0-9a-f]{64}$",
+    )
 
     database_path: Path = Path("data/patchwork.db")
     repository_dir: Path = Path.home() / ".local/share/patchwork-ai/repositories"

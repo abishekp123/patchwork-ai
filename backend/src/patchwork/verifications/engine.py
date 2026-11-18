@@ -289,6 +289,7 @@ async def run_verification(
             repository_id=repository_id,
             commit_sha=commit_sha,
             sandbox_mode=sandbox.config.mode if sandbox is not None else sandbox_mode,
+            environment_image=sandbox.config.image if sandbox else settings.verification_image,
         )
     )
     if record.status in {"COMPLETED", "FAILED", "CANCELLED"}:
@@ -304,6 +305,7 @@ async def run_verification(
         sandbox = sandbox or SandboxFactory.create(
             sandbox_mode,
             config=SandboxConfig(
+                image=settings.verification_image,
                 trusted_roots=[str(baseline_dir.parent)],
                 runtime_root=str(resource_root(settings.database_path)),
                 owner_id=owner_id(settings.database_path),

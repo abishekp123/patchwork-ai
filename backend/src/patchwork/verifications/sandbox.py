@@ -117,7 +117,7 @@ class SandboxAdapter:
             )
         if re.fullmatch(r"[1-9]\d{0,9}(?::\d{1,10})?", self.config.user) is None:
             raise PatchworkError("sandbox_policy", "The sandbox must run as a non-root user.", 422)
-        if not re.fullmatch(r"[a-z0-9./:_-]+@sha256:[0-9a-f]{64}", self.config.image):
+        if not re.fullmatch(r"(?:[a-z0-9./:_-]+@)?sha256:[0-9a-f]{64}", self.config.image):
             raise PatchworkError(
                 "sandbox_policy",
                 "Docker verification requires an image pinned by SHA-256 digest.",
@@ -210,6 +210,32 @@ class SandboxAdapter:
         stdout: str,
         stderr: str,
     ) -> VerificationSummary:
+        if "pytest" in command:
+            # Only the final pytest summary, never individual test/log lines.
+            lines = f"{stdout}\n{stderr}".splitlines()
+            totals = next(
+                (
+                    line
+                    for line in reversed(lines)
+                    if re.search(r"\d+ (?:passed|failed|error|skipped).* in \d", line)
+                ),
+                "",
+            )
+            counts = {
+                name.rstrip("s"): int(number)
+                for number, name in re.findall(r"(\d+) (passed|failed|errors?|skipped)", totals)
+            }
+            passed = counts.get("passed", 0)
+            failed = counts.get("failed", 0) + counts.get("error", 0)
+            skipped = counts.get("skipped", 0)
+            return summary.model_copy(
+                update={
+                    "tests_total": passed + failed + skipped,
+                    "tests_passed": passed,
+                    "tests_failed": failed,
+                    "tests_skipped": skipped,
+                }
+            )
         if "unittest" not in command:
             return summary
         output = f"{stdout}\n{stderr}"
@@ -255,7 +281,8 @@ class SandboxAdapter:
                 503,
             )
         resolved_workspace = self._trusted_workspace(workspace)
-        script = "#!/bin/sh\nset -eu\n" + command + "\n"
+        execution_command = command + " -p no:cacheprovider" if "pytest" in command else command
+        script = "#!/bin/sh\nset -eu\n" + execution_command + "\n"
         with tempfile.TemporaryDirectory(
             prefix="runner-", dir=self.config.runtime_root
         ) as temp_dir:
@@ -308,6 +335,8 @@ class SandboxAdapter:
                 self.config.user,
                 "--env",
                 "PYTHONDONTWRITEBYTECODE=1",
+                "--env",
+                "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1",
                 "--workdir",
                 self.config.workdir,
                 "--mount",

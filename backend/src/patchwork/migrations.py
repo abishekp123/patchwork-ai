@@ -111,4 +111,5 @@ MIGRATIONS: tuple[tuple[str, ...], ...] = (
     )""",
         "CREATE INDEX IF NOT EXISTS verifications_patch ON verifications(patch_id, created_at)",
     ),
+    ("ALTER TABLE verifications ADD COLUMN environment_image TEXT",),
 )

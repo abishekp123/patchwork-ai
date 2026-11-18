@@ -79,6 +79,7 @@ class VerificationRecord(BaseModel):
         "CANCELLED",
     ]
     sandbox_mode: str
+    environment_image: str | None = None
     created_at: str
     updated_at: str
     started_at: str | None = None

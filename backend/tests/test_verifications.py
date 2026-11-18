@@ -353,3 +353,24 @@ def test_snapshot_mount_is_readable_beneath_private_parent(settings: Settings, t
     assert stat.S_IMODE(private_root.stat().st_mode) == 0o700
     assert stat.S_IMODE(workspace.stat().st_mode) == 0o755
     assert stat.S_IMODE((workspace / "example.py").stat().st_mode) == 0o644
+
+
+@pytest.mark.parametrize("image", ["python:latest", "sha256:bad", "../../local-image"])
+def test_verification_environment_requires_immutable_identity(image):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        Settings(verification_image=image)
+
+
+def test_pytest_summary_counts_only_final_summary():
+    from patchwork.verifications.models import VerificationSummary
+
+    summary = SandboxAdapter._with_unittest_counts(
+        VerificationSummary(exit_code=1),
+        "python -m pytest -q",
+        "fake log: 999 passed\nFAILED test.py::test_one\n1 failed, 2 passed, 1 skipped in 0.12s\n",
+        "",
+    )
+    assert summary.tests_total == 4 and summary.tests_passed == 2
+    assert summary.tests_failed == 1 and summary.tests_skipped == 1

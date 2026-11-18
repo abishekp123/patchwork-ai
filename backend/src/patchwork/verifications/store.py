@@ -42,6 +42,7 @@ class VerificationStore:
         repository_id: str,
         commit_sha: str,
         sandbox_mode: str,
+        environment_image: str | None = None,
     ) -> VerificationRecord:
         identifier = uuid.uuid4().hex
         now = timestamp()
@@ -65,8 +66,8 @@ class VerificationStore:
                     id, patch_id, repository_id, commit_sha, status, sandbox_mode,
                     created_at, updated_at, started_at, completed_at,
                     baseline_summary, patched_summary, comparison_json,
-                    error_code, execution_logs_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, '[]')
+                    error_code, execution_logs_json, environment_image
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, '[]', ?)
                 """,
                 (
                     identifier,
@@ -77,6 +78,7 @@ class VerificationStore:
                     sandbox_mode,
                     now,
                     now,
+                    environment_image,
                 ),
             )
         return self.get(identifier)

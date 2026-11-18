@@ -42,6 +42,7 @@ def sandbox_from_request(settings: Config) -> SandboxAdapter:
     return SandboxFactory.create(
         settings.sandbox_mode,
         config=SandboxConfig(
+            image=settings.verification_image,
             trusted_roots=[tempfile.gettempdir()],
             runtime_root=str(resource_root(settings.database_path)),
             owner_id=owner_id(settings.database_path),
@@ -99,6 +100,7 @@ async def create_verification_for_patch(
         repository_id=repository.id,
         commit_sha=repository.commit_sha,
         sandbox_mode=sandbox.config.mode,
+        environment_image=sandbox.config.image,
     )
 
     tasks = getattr(request.app.state, "verification_tasks", {})
