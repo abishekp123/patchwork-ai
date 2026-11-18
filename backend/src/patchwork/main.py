@@ -17,6 +17,7 @@ from patchwork.api.repositories import router as repositories_router
 from patchwork.api.verifications import router as verifications_router
 from patchwork.config import Settings
 from patchwork.database import initialize_database
+from patchwork.runtime import application_owner, cleanup_orphans, reconcile
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -24,17 +25,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        initialize_database(resolved_settings.database_path)
-        try:
-            yield
-        finally:
-            tasks = [
-                *app.state.verification_tasks.values(),
-                *app.state.investigation_tasks.values(),
-            ]
-            for task in tasks:
-                task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
+        with application_owner(resolved_settings.database_path):
+            initialize_database(resolved_settings.database_path)
+            reconcile(resolved_settings.database_path)
+            await asyncio.to_thread(cleanup_orphans, resolved_settings.database_path)
+            try:
+                yield
+            finally:
+                tasks = [
+                    *app.state.verification_tasks.values(),
+                    *app.state.investigation_tasks.values(),
+                ]
+                for task in tasks:
+                    if not task.cancelling():
+                        task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                reconcile(resolved_settings.database_path, cancelled=True)
 
     app = FastAPI(title="Patchwork AI", version=__version__, lifespan=lifespan)
     app.state.settings = resolved_settings
@@ -47,7 +53,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(patches_router, prefix="/api")
     app.include_router(verifications_router, prefix="/api")
     app.include_router(repositories_router, prefix="/api")
-    # Preserve the existing Vite proxy, which removes /api before forwarding.
+    # Retain legacy unprefixed repository routes.
     app.include_router(repositories_router, include_in_schema=False)
     register_error_handlers(app)
     return app

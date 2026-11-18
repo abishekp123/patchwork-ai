@@ -139,6 +139,7 @@ class VerificationStore:
         if unknown:
             raise ValueError(f"Unsupported verification update fields: {sorted(unknown)}")
         with connect_database(self.database_path) as connection, connection:
+            connection.execute("BEGIN IMMEDIATE")
             current = connection.execute(
                 "SELECT * FROM verifications WHERE id = ?",
                 (identifier,),
@@ -149,6 +150,8 @@ class VerificationStore:
                     "Verification record was not found.",
                     404,
                 )
+            if current["status"] in {"COMPLETED", "FAILED", "CANCELLED"}:
+                return self._decode(current)
             new_status = payload.get("status", current["status"])
             if new_status not in VALID_STATUSES:
                 raise ValueError("Unsupported verification status.")
@@ -174,13 +177,13 @@ class VerificationStore:
                     payload.get("completed_at", current["completed_at"]),
                     json.dumps(baseline.model_dump(), sort_keys=True)
                     if baseline is not None
-                    else None,
+                    else current["baseline_summary"],
                     json.dumps(patched.model_dump(), sort_keys=True)
                     if patched is not None
-                    else None,
+                    else current["patched_summary"],
                     json.dumps(comparison.model_dump(), sort_keys=True)
                     if comparison is not None
-                    else None,
+                    else current["comparison_json"],
                     payload.get("error_code", current["error_code"]),
                     json.dumps(execution_logs, sort_keys=True),
                     identifier,

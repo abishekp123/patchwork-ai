@@ -11,6 +11,7 @@ from patchwork.errors import PatchworkError
 from patchwork.ingestion.validation import validate_path
 from patchwork.patches.store import PatchStore
 from patchwork.repositories.store import timestamp
+from patchwork.runtime import owner_id, resource_root
 from patchwork.verifications.models import (
     SandboxConfig,
     VerificationRecord,
@@ -290,7 +291,9 @@ async def run_verification(
             sandbox_mode=sandbox.config.mode if sandbox is not None else sandbox_mode,
         )
     )
-    private_root = Path(tempfile.mkdtemp(prefix="patchwork-verify-"))
+    if record.status in {"COMPLETED", "FAILED", "CANCELLED"}:
+        return record
+    private_root = Path(tempfile.mkdtemp(prefix="job-", dir=resource_root(settings.database_path)))
     baseline_dir = private_root / "baseline"
     patched_dir = private_root / "patched"
     try:
@@ -302,6 +305,8 @@ async def run_verification(
             sandbox_mode,
             config=SandboxConfig(
                 trusted_roots=[str(baseline_dir.parent)],
+                runtime_root=str(resource_root(settings.database_path)),
+                owner_id=owner_id(settings.database_path),
                 timeout_seconds=int(settings.verification_timeout_seconds),
                 output_limit_bytes=settings.verification_output_limit_bytes,
             ),

@@ -21,8 +21,19 @@ class Store:
         self.settings = settings
 
     def create(self, repository, description):
+        description = redact(description.strip())
         identifier, now = uuid.uuid4().hex, timestamp()
         with connect_database(self.settings.database_path) as db, db:
+            db.execute("BEGIN IMMEDIATE")
+            active = db.execute(
+                "SELECT id FROM investigations WHERE repository_id=? AND description=? "
+                "AND status NOT IN ('COMPLETED','FAILED','CANCELLED','BUDGET_EXHAUSTED')",
+                (repository.id, description),
+            ).fetchone()
+            if active:
+                raise PatchworkError(
+                    "investigation_in_progress", "This investigation is already running.", 409
+                )
             db.execute(
                 "INSERT INTO investigations VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                 (

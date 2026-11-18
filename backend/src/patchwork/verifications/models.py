@@ -8,6 +8,8 @@ from pydantic import BaseModel, ConfigDict, Field
 class SandboxConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
+    runtime_root: str | None = None
+    owner_id: str | None = None
     mode: Literal["fake", "docker"] = "docker"
     image: str = "python@sha256:593bd06efe90efa80dc4eee3948be7c0fde4134606dd40d8dd8dbcade98e669c"
     memory_mb: int = Field(default=512, ge=64, le=4096)

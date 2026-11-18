@@ -369,3 +369,63 @@ def test_real_verification_api_survives_restart(settings: Settings, client_type)
         assert record["status"] == "COMPLETED"
         assert record["sandbox_mode"] == "docker"
         assert restarted.get("/api/dashboard").json()["completed_verifications"] == 1
+
+
+def test_restart_removes_owned_orphan_container_and_mounts(settings):
+    import sys
+
+    from fastapi.testclient import TestClient
+
+    from patchwork.main import create_app
+    from patchwork.runtime import owner_id, resource_root
+
+    # Trusted test launcher is killed while a controlled container is running.
+    # No repository code runs on the host, and unrelated owners are never targeted.
+    code = """
+import subprocess,sys,time
+from pathlib import Path
+from patchwork.runtime import application_owner,resource_root,owner_id
+from patchwork.database import initialize_database
+from patchwork.verifications.models import SandboxConfig
+path=Path(sys.argv[1])
+with application_owner(path):
+    initialize_database(path)
+    (resource_root(path)/'job-orphan').mkdir()
+    result=subprocess.run(['docker','run','-d','--rm','--pull=never','--network=none',
+        '--read-only','--cap-drop=ALL','--security-opt','no-new-privileges:true',
+        '--user','65532:65532','--pids-limit','16','--memory','64m','--cpus','0.25',
+        '--label','com.patchwork.verification=true','--label','com.patchwork.owner='+owner_id(path),
+        SandboxConfig().image,'python','-c','import time; time.sleep(60)'],
+        check=True,capture_output=True,text=True)
+    print(result.stdout.strip(),flush=True)
+    time.sleep(60)
+"""
+    process = subprocess.Popen(
+        [sys.executable, "-c", code, str(settings.database_path)], stdout=subprocess.PIPE, text=True
+    )
+    container = ""
+    try:
+        container = process.stdout.readline().strip()
+        assert len(container) == 64
+        process.kill()
+        process.wait(timeout=5)
+        with TestClient(create_app(settings)) as client:
+            assert client.get("/health").status_code == 200
+        assert not list(resource_root(settings.database_path).iterdir())
+        listing = subprocess.check_output(
+            [
+                "docker",
+                "ps",
+                "-aq",
+                "--filter",
+                f"label=com.patchwork.owner={owner_id(settings.database_path)}",
+            ],
+            text=True,
+        )
+        assert not listing.strip()
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
+        if container:
+            subprocess.run(["docker", "rm", "-f", container], capture_output=True, timeout=10)

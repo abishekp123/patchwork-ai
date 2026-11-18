@@ -8,6 +8,7 @@ from patchwork.config import Settings
 from patchwork.errors import PatchworkError
 from patchwork.patches.store import PatchStore
 from patchwork.repositories.store import RepositoryStore, timestamp
+from patchwork.runtime import owner_id, resource_root
 from patchwork.schemas.errors import ErrorResponse
 from patchwork.schemas.verifications import (
     SandboxStatusResponse,
@@ -42,6 +43,8 @@ def sandbox_from_request(settings: Config) -> SandboxAdapter:
         settings.sandbox_mode,
         config=SandboxConfig(
             trusted_roots=[tempfile.gettempdir()],
+            runtime_root=str(resource_root(settings.database_path)),
+            owner_id=owner_id(settings.database_path),
             timeout_seconds=int(settings.verification_timeout_seconds),
             output_limit_bytes=settings.verification_output_limit_bytes,
         ),
@@ -170,7 +173,9 @@ async def cancel_verification(
     tasks = getattr(request.app.state, "verification_tasks", {})
     task = tasks.get(identifier)
     if task is not None and not task.done():
-        task.cancel()
+        if not task.cancelling():
+            task.cancel()
+        await asyncio.gather(asyncio.shield(task), return_exceptions=True)
     request.app.state.verification_tasks = tasks
     store.update(
         identifier,

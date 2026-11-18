@@ -256,7 +256,9 @@ class SandboxAdapter:
             )
         resolved_workspace = self._trusted_workspace(workspace)
         script = "#!/bin/sh\nset -eu\n" + command + "\n"
-        with tempfile.TemporaryDirectory(prefix="patchwork-verification-") as temp_dir:
+        with tempfile.TemporaryDirectory(
+            prefix="runner-", dir=self.config.runtime_root
+        ) as temp_dir:
             tmp = Path(temp_dir)
             if "," in str(tmp.resolve()):
                 raise PatchworkError(
@@ -286,6 +288,11 @@ class SandboxAdapter:
                 container_name,
                 "--label",
                 "com.patchwork.verification=true",
+                *(
+                    ["--label", f"com.patchwork.owner={self.config.owner_id}"]
+                    if self.config.owner_id
+                    else []
+                ),
                 "--read-only",
                 "--network=none",
                 "--cap-drop=ALL",
