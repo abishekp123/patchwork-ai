@@ -99,6 +99,7 @@ def cleanup_orphans(database: Path) -> None:
 
 @contextmanager
 def application_owner(database: Path):
+    database = database.resolve()  # Symlink/relative aliases must share the same lock inode.
     database.parent.mkdir(parents=True, exist_ok=True)
     lock = database.with_name(database.name + ".runtime.lock")
     fd = os.open(lock, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)

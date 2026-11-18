@@ -190,3 +190,12 @@ def test_unavailable_docker_keeps_orphan_mounts(settings, monkeypatch):
         cleanup_orphans(settings.database_path)
     assert marker.exists()
     marker.rmdir()
+
+
+def test_database_alias_cannot_acquire_a_second_owner(settings, tmp_path):
+    _ready_repository(settings)
+    alias = tmp_path / "alias.db"
+    alias.symlink_to(settings.database_path)
+    with application_owner(settings.database_path):
+        with pytest.raises(PatchworkError, match="one worker"), application_owner(alias):
+            pass
