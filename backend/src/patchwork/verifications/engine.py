@@ -22,16 +22,23 @@ from patchwork.verifications.store import VerificationStore
 
 
 def _populate_snapshot(database_path: Path, repository_id: str, destination: Path) -> None:
+    destination.mkdir(exist_ok=True)
+    destination.chmod(0o755)  # Mounted child; its private host parent remains 0700.
     with connect_database(database_path) as connection:
         rows = connection.execute(
             "SELECT path, source FROM files WHERE repository_id = ? ORDER BY path",
             (repository_id,),
         ).fetchall()
     for row in rows:
-        relative = Path(row["path"])
+        relative = Path(validate_path(row["path"]))
         target = destination / relative
         target.parent.mkdir(parents=True, exist_ok=True)
+        parent = target.parent
+        while parent != destination:
+            parent.chmod(0o755)
+            parent = parent.parent
         target.write_text(row["source"], encoding="utf-8")
+        target.chmod(0o644)
 
 
 def _apply_unified_diff_to_file(file_path: Path, diff_text: str) -> None:
@@ -283,8 +290,9 @@ async def run_verification(
             sandbox_mode=sandbox.config.mode if sandbox is not None else sandbox_mode,
         )
     )
-    baseline_dir = Path(tempfile.mkdtemp(prefix="patchwork-verify-base-"))
-    patched_dir = Path(tempfile.mkdtemp(prefix="patchwork-verify-patched-"))
+    private_root = Path(tempfile.mkdtemp(prefix="patchwork-verify-"))
+    baseline_dir = private_root / "baseline"
+    patched_dir = private_root / "patched"
     try:
         _populate_snapshot(settings.database_path, repository_id, baseline_dir)
         _populate_snapshot(settings.database_path, repository_id, patched_dir)
@@ -376,3 +384,4 @@ async def run_verification(
                     elif child.is_dir():
                         child.rmdir()
                 directory.rmdir()
+        private_root.rmdir()

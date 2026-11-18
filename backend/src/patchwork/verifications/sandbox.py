@@ -264,11 +264,16 @@ class SandboxAdapter:
                     "Runner paths cannot contain Docker mount separators.",
                     422,
                 )
-            script_path = tmp / "entrypoint.sh"
+            # Keep daemon bookkeeping private on the host. Only the readable
+            # runner child is mounted, so UID 65532 works on native Linux too.
+            runner = tmp / "runner"
+            runner.mkdir(mode=0o755)
+            runner.chmod(0o755)
+            script_path = runner / "entrypoint.sh"
             cidfile = tmp / "container-id"
             container_name = f"patchwork-verify-{uuid.uuid4().hex}"
             script_path.write_text(script, encoding="utf-8")
-            script_path.chmod(0o755)
+            script_path.chmod(0o644)
             capture = _OutputCapture(self.config.output_limit_bytes)
             args = [
                 "docker",
@@ -301,7 +306,7 @@ class SandboxAdapter:
                 "--mount",
                 f"type=bind,src={resolved_workspace},dst={self.config.workdir},ro=false",
                 "--mount",
-                f"type=bind,src={tmp},dst=/tmp/patchwork-runtime,ro=false",
+                f"type=bind,src={runner},dst=/tmp/patchwork-runtime,ro=true",
                 "--tmpfs",
                 "/tmp:rw,noexec,nosuid,size=64m",
                 "--tmpfs",

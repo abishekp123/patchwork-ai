@@ -338,3 +338,18 @@ def test_cancel_waits_for_bounded_sandbox_cleanup(tmp_path):
         assert cleaned.is_set()
 
     asyncio.run(exercise())
+
+
+def test_snapshot_mount_is_readable_beneath_private_parent(settings: Settings, tmp_path):
+    import stat
+
+    from patchwork.verifications.engine import _populate_snapshot
+
+    repository = _ready_repository(settings)
+    private_root = tmp_path / "private"
+    private_root.mkdir(mode=0o700)
+    workspace = private_root / "baseline"
+    _populate_snapshot(settings.database_path, repository.id, workspace)
+    assert stat.S_IMODE(private_root.stat().st_mode) == 0o700
+    assert stat.S_IMODE(workspace.stat().st_mode) == 0o755
+    assert stat.S_IMODE((workspace / "example.py").stat().st_mode) == 0o644
