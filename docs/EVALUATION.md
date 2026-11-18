@@ -80,5 +80,6 @@ Fixture success is not general correctness. Test counts come from bounded proces
 output, not tamper-proof attestation; adversarial code can spoof output. Docker
 shares a kernel and is not a hostile multi-tenant isolation guarantee. The pinned
 standard-library image has no pytest or third-party project dependencies. Broader
-repositories, dependency provisioning, model-quality measurements, authentication,
-durable workers, and crash recovery for active verification remain future work.
+repositories, model-quality measurements, authentication, and durable external
+workers remain future work. A reviewed pytest dependency image and local startup
+reconciliation are now available; see [RELIABILITY](RELIABILITY.md).

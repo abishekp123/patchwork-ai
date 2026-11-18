@@ -174,3 +174,19 @@ up to the current command timeout plus Docker cleanup grace. Historical fake-mod
 records remain readable and are explicitly labeled simulated by the review UI.
 The opt-in live evaluation is a CLI, not a new public API; its consent, budgets,
 and report schema are documented in [EVALUATION](EVALUATION.md).
+
+## Restart and dependency-environment behavior
+
+- A duplicate active repository/description investigation returns 409
+  `investigation_in_progress`; an identical request after termination creates a
+  new attempt. Verification continues to reject duplicate active patch jobs.
+- Startup marks abandoned work FAILED/`interrupted`, preserving available results.
+  Graceful shutdown cancels pending work. Cancellation is idempotent and terminal
+  states cannot be overwritten by late results. Retry creates a new record; the
+  server never resumes paid calls or sandbox execution automatically.
+- Verification responses include nullable `environment_image`: the administrator's
+  pinned image identity used for this run, or null for legacy rows. Request bodies
+  cannot choose images or dependency lists. Mutable configured tags are invalid.
+- The API requires a single owner process per local database. Orphan-container
+  cleanup failure prevents startup with `recovery_cleanup_pending`; restore Docker
+  and restart. No repository or unrelated container cleanup is performed.

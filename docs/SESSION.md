@@ -1,89 +1,103 @@
 # Session handoff
 
-Date: 2026-11-17 (America/Toronto). Scope: verification hardening, real Docker CI,
-and opt-in AI repair evaluation. Existing `master` history preserved; no new
-repository or speculative milestone work.
+Date: 2026-11-18 (America/Toronto). Scope: final local validation, job recovery,
+and controlled Python dependency environments. Started from verified `cfe5ff6`;
+existing history and Docker isolation were preserved.
 
 ## Implemented
 
-- Public verification requests and environment settings accept only Docker.
-  Fake adapters require direct test injection. Missing daemon/image returns 503;
-  invalid/unequal commands return 422; unapproved patches remain blocked with 409.
-- Docker preflight checks CLI, daemon, and pinned image. Infrastructure failures
-  are INCONCLUSIVE. Worker threads keep the event loop responsive; cancellation
-  and graceful shutdown wait for bounded container cleanup.
-- Native Linux revealed a host-mount permission defect hidden by Docker Desktop.
-  Disposable readable mount children now sit under private mode-0700 parents;
-  the runner is mounted read-only and daemon bookkeeping is not exposed.
-  Non-root UID 65532, no networking/capabilities, read-only root, resource limits,
-  timeouts, bounded output, and container cleanup remain enforced.
-- Dedicated Ubuntu amd64 Docker CI pulls the existing multi-platform digest and
-  requires at least eight executed tests with zero skips. Includes confinement,
-  timeout, five known-repair fixture oracles, and HTTP approval/restart coverage.
-- Separate live evaluation CLI uses real investigation and patch providers, source
-  evidence validation, explicit fixture approval, and actual Docker comparison.
-  Five fixtures, one patch attempt each, shared call/token/time budgets, and
-  checkpointed JSON/Markdown reports. See [EVALUATION](EVALUATION.md).
-- Fixed Vite routing: `/api/health` maps to `/health`; other API prefixes remain.
-  Historical fake verification records are visibly labeled simulated.
+- Single API owner per canonical SQLite database path via OS lock (including symlink aliases). Startup atomically fails
+  interrupted investigations/verifications, preserves partial evidence/results,
+  and cleans only database-owned containers and temporary children. Docker must
+  be restored before orphan cleanup can proceed. No automatic paid/execution
+  replay; explicit retry produces a new attempt.
+- Idempotent cancellation and immutable terminal records, duplicate investigation
+  prevention, graceful shutdown handling, and clear UI interruption/retry text.
+  Tests kill real owner processes, verify lock recovery, and remove real orphan
+  containers. SQLite loss during shutdown is logged without masking cleanup.
+- Trusted pytest image built from a digest-pinned Python base and reviewed,
+  hash-locked wheels. Installation happens during an offline image build;
+  runtime networking/install remain disabled. Configured image identities must
+  be immutable and are persisted on verification records (migration 3).
+- Playwright Chromium/WebKit tests use an explicitly enabled test-only server,
+  local Git fixtures, deterministic model responses, real services, and real
+  Docker. Production has no testing routes or model substitution. Fixed file
+  button accessibility semantics and the hidden active-verification cancel button.
+- Actual browser screenshots are in `docs/screenshots`. The simulated model is
+  labeled in the UI and README; these are not live AI performance evidence.
 
-## Executed validation
+## Exact verification evidence
 
-Local: macOS Apple Silicon, Python 3.14, Docker Desktop arm64; frontend Node 26.
-Commands below are from project root unless specified otherwise.
-
-| Command/check | Actual result |
+| Check | Result |
 | --- | --- |
-| `PATH="/Applications/Docker.app/Contents/Resources/bin:$PATH" PATCHWORK_RUN_DOCKER_INTEGRATION=1 backend/.venv/bin/pytest backend/tests -q` | 168 passed, 0 failed, 0 skipped |
-| Explicit Docker suite alone | 8 passed, 0 failed, 0 skipped |
-| `backend/.venv/bin/ruff check backend` | Passed |
-| `backend/.venv/bin/ruff format --check backend` | 77 files formatted |
-| `backend/.venv/bin/python -m pip check` | No broken requirements |
-| `npm run check` in `frontend/` | 31 tests passed; lint, formatting, TypeScript, build passed |
-| `backend/.venv/bin/python -m patchwork.evaluations` | Seven offline checks true; fake provider, no execution |
-| Live evaluation with explicit consent | NOT_RUN, zero provider calls: no API key in environment or local `.env` |
-| GitHub Actions | [Implementation dc907e5: all four jobs passed](https://github.com/abishekp123/patchwork-ai/actions/runs/44227188964), including real Docker amd64 |
+| Full backend, Docker enabled | **183 passed, 0 failed, 0 skipped** (33.06s) |
+| Focused Docker + verification tests | **30 passed** (includes 10 real Docker tests) |
+| Fault/recovery + health/API focused run | **27 passed** |
+| Frontend `npm run check` | **31 passed**, Oxlint/Prettier/TypeScript/build passed |
+| Playwright Chromium + WebKit | **8 passed**, four per browser; no retries/skips |
+| Ruff lint and format | Passed; 81 Python files formatted |
+| `pip check` | No broken requirements |
+| Live five-fixture AI evaluation | **NOT_RUN**; no credentials in environment or `.env`; zero provider calls |
+| npm dependency audit | Six high-severity entries from dev-toolchain `picomatch` ReDoS chain; unresolved |
+| CI | All four jobs passed for `90c7a14`: [run 44415888482](https://github.com/abishekp123/patchwork-ai/actions/runs/44415888482) |
 
-The ordinary backend CI jobs intentionally skip eight opt-in Docker cases; the
-separate Docker job executes them. Known-repair oracle successes are **not** live
-AI successes. The recorded [live JSON](evaluation-results/live-not-run.json) and
-[Markdown](evaluation-results/live-not-run.md) contain all five NOT_RUN cases.
+Backend command from root (Docker CLI must be on PATH):
 
-## Actual local application checks
+```sh
+PATCHWORK_RUN_DOCKER_INTEGRATION=1 \
+PATCHWORK_TEST_IMAGE="$PATCHWORK_VERIFICATION_IMAGE" \
+  backend/.venv/bin/pytest backend/tests -q
+```
 
-Started Uvicorn and Vite using an isolated temporary database and a test-only
-local Git transport dependency. Through the actual Vite HTTP proxy:
+The ordinary CI backend jobs intentionally skip the ten Docker tests. The Docker
+job builds the reviewed image, executes all ten without skips, then runs both
+browser projects sequentially. Do not overlap browser and Docker suites: existing
+container-cleanup assertions observe all labelled test containers.
 
-- Frontend HTML and health returned 200; dashboard, provider/sandbox status routes
-  also returned 200. Controlled local Git import returned 201/ready; indexed
-  `repair` source search returned precise symbols and snippets.
-- Missing provider credentials returned 503 without creating a fake investigation.
-  Offline tests cover state-machine and provider-response behavior.
-- A clearly labeled known fixture patch was blocked before approval (409), then
-  explicitly approved through HTTP. Docker baseline: 0/3 passed; patched: 3/3
-  passed; persisted result IMPROVED. This was not an AI-generated repair.
-- Dashboard API showed one approved patch and one completed verification. A real
-  backend process restart preserved the result and activity. Docker integration
-  tests independently exercise approval and app-instance restart persistence.
-- Browser automation was attempted but failed with an internal `timeoutMs`
-  connection error. HTML delivery and React tests passed; no visual browser or
-  interactive user-flow pass is claimed. No live-model test occurred.
+From `frontend/`, run `npm run check` and `npm run test:browser`. Browser evidence
+covers import, keyboard file navigation, search, investigation states, evidence
+and patch review, explicit approval, real Docker improvement, empty/loading/API
+failure states, refresh persistence, and cancellation before results exist.
+The workflow fixture fails one of two tests before repair and passes both afterward.
+No imported Python executes on the host.
 
-## Remaining limitations and next work
+## Live evaluation command
 
-Verdict: **core working prototype**, with locally validated Docker/API workflow.
-It is not deployment-ready or a measured real-world AI repair system.
+The existing harness calls `OpenAIProvider.decide`, which sends strict function
+calls to `https://api.openai.com/v1/responses` with bounded retries/timeouts and
+usage metadata. Neither model investigations nor patch proposals were measured
+against a real provider this session. Repair rate, failure rate, model latency,
+and inference cost are **N/A**, not zero-percent results.
 
-1. Supply credentials and run the opt-in live suite in a fresh output directory;
-   review generated diffs and failures before making model-quality claims.
-2. Complete an interactive browser review when automation works. UI default
-   pytest execution needs a reviewed dependency-image strategy: the current
-   pinned image contains standard-library Python, not pytest/project packages.
-3. Before deployment: authentication/authorization, durable workers, crash/orphan
-   recovery for active verification, global quotas, and stronger hostile-code
-   isolation. Completed records persist, but active work is not durably resumed.
-4. Container output is not tamper-proof test attestation. These small fixtures do
-   not prove general patch correctness; Docker shares the daemon/kernel.
+After securely exporting `OPENAI_API_KEY`, from `backend/`, with Docker/base image
+ready, use a fresh output directory:
 
-Do not begin broader production infrastructure without authorization. Local
-validation data and databases remain outside the repository and are not committed.
+```sh
+.venv/bin/python -m patchwork.evaluations.live --live --approve-fixtures \
+  --output-dir /tmp/patchwork-live-20261118-new \
+  --max-calls 40 --max-reserved-tokens 600000 --max-seconds 900
+```
+
+Recorded NOT_RUN reports are in `docs/evaluation-results`. See
+[EVALUATION](EVALUATION.md) for consent and bounds, and
+[RELIABILITY](RELIABILITY.md) for dependency-image setup and recovery semantics.
+
+## Verdict and remaining work
+
+**Ready as a software engineering portfolio demonstration of a local application**:
+real browser/API/Docker integration and process-failure recovery are demonstrated.
+It is not deployment-ready and its AI repair quality remains unmeasured.
+
+- Run the real five-fixture evaluation with credentials before claiming model
+  success rates. Browser tests intentionally use a deterministic provider.
+- Resolve the reported development-toolchain advisory through a reviewed update;
+  npm suggested major downgrades, which were not applied blindly. Development
+  servers remain loopback-bound. No production-security readiness claim is made.
+- One process/local database only; no multi-user authentication, global quotas,
+  distributed execution, or durable resumption. Interrupted jobs require retry.
+- Dependency support is the reviewed image/lock, not arbitrary projects or dynamic
+  installs. Docker shares a kernel; output-based test summaries are not attestation.
+- Recovery covers newly labelled resources. Legacy unowned temporary paths require
+  manual review. Database corruption requires restoring usable storage.
+
+Do not introduce broader deployment infrastructure without a new request.

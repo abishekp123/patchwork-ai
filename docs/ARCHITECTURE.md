@@ -128,3 +128,18 @@ Native Linux mounts use readable snapshot/runner children beneath mode-0700 host
 parents. Only children are mounted; the runner mount is read-only and Docker
 container-ID bookkeeping remains host-private. This avoids relying on Docker
 Desktop permission translation while retaining the numeric non-root identity.
+
+## Local job ownership and trusted dependency environments
+
+`runtime.py` holds an OS lock per database during the API lifespan. Startup
+reconciles interrupted state before cleaning database-scoped, labelled Docker
+resources. Terminal states are immutable; identical active investigations are
+serialized transactionally. No automatic inference/execution replay occurs.
+Graceful cancellation awaits cleanup. See [RELIABILITY](RELIABILITY.md).
+
+The administrator may configure an immutable trusted verification image. The
+optional reviewed pytest image uses a pinned base and hash-locked wheels installed
+in an offline build. Imported dependency manifests are never installed. Migration
+3 adds the image identity to verification records. The browser test server lives
+only in `backend/tests`, with explicit fake-model injection and real Git/API/Docker;
+production composition has no testing routes or model fallback.

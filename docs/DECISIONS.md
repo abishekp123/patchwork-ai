@@ -44,7 +44,6 @@ References: [Git fetch](https://git-scm.com/docs/git-fetch),
 [Git transport configuration](https://git-scm.com/docs/git-config), and
 [Tree-sitter Python bindings](https://tree-sitter.github.io/py-tree-sitter/).
 
-
 ## Verification hardening (2026-11-17)
 
 - Runtime configuration and requests accept Docker only. Test substitution uses
@@ -64,3 +63,17 @@ References: [Git fetch](https://git-scm.com/docs/git-fetch),
 - Native Linux requires the container UID to traverse the mounted directory.
   Keep a private mode-0700 parent and mount only readable disposable children;
   never solve permissions by running containers as root or weakening isolation.
+
+## Local reliability (2026-11-18)
+
+- Enforce one process per SQLite database using a kernel-released file lock.
+  Fail abandoned jobs on restart; require explicit retry instead of replaying
+  billable inference or untrusted execution. Preserve partial evidence/results.
+- Scope disposable resources and container labels to the canonical database path.
+  Remove containers before files; unavailable Docker retains mounts and fails
+  startup. Avoid sweeping unowned/legacy paths.
+- Prebuild trusted dependencies from reviewed wheel hashes; disable networking
+  during image installation and runtime. Persist immutable image identity.
+- Use project-owned Playwright tests for Chromium/WebKit. Inject deterministic
+  model responses only into an explicitly enabled test server; keep real API,
+  persistence, and Docker execution in the browser workflow.

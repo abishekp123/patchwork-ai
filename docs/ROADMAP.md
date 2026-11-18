@@ -20,8 +20,12 @@
 7. **Verification hardening — implemented and locally checked.** Docker-only
    runtime boundary, native amd64 Docker CI, protected repair fixtures, live AI
    evaluation harness, and corrected Vite API routing. Real AI evaluation remains
-   NOT RUN without credentials; browser automation was unavailable in this session.
-8. **Production hardening — future.** Authentication/authorization, durable
+   NOT RUN without credentials; the subsequent reliability stage adds successful browser runs.
+8. **Final local validation and reliability — implemented.** Chromium/WebKit
+   workflows, real Docker dependency tests, startup reconciliation, SIGKILL and
+   orphan cleanup coverage, idempotent cancellation, and duplicate prevention.
+   Live model evaluation remains NOT RUN without credentials.
+9. **Production hardening — future.** Authentication/authorization, durable
    external workers, global quotas, automated snapshot collection, managed
    telemetry, deployment, and broader measured model-quality evaluation.
 

@@ -171,6 +171,30 @@ human approval, and indexed-snapshot immutability. It needs no API key or Docker
 daemon, does not execute repository code, and does not represent live model
 quality or real sandbox execution.
 
+### Trusted pytest environment and browser tests
+
+From the project root, with Docker running and on PATH:
+
+```sh
+backend/.venv/bin/python scripts/build_verification_image.py
+export PATCHWORK_VERIFICATION_IMAGE="$(docker image inspect patchwork-pytest:reviewed --format '{{.Id}}')"
+cd frontend
+npx playwright install chromium webkit
+npm run test:browser
+```
+
+The environment uses reviewed, hash-locked wheels and an offline Docker build.
+Set the same image variable before starting the normal backend to enable the UI's
+pytest verification command. See [recovery behavior, dependency policy, and
+browser setup](docs/RELIABILITY.md).
+
+Actual browser evidence (local Git fixture, **simulated model**, real API and
+Docker; not evidence of live AI quality):
+
+![Chromium workflow with persisted Docker improvement](docs/screenshots/chromium-workflow.png)
+
+[WebKit screenshot](docs/screenshots/webkit-workflow.png)
+
 ### Opt-in Docker sandbox integration tests
 
 The normal backend suite does not start Docker. To run the separate real-container
@@ -183,23 +207,25 @@ docker pull \
   python@sha256:593bd06efe90efa80dc4eee3948be7c0fde4134606dd40d8dd8dbcade98e669c
 cd backend
 PATCHWORK_RUN_DOCKER_INTEGRATION=1 \
+  PATCHWORK_TEST_IMAGE="$PATCHWORK_VERIFICATION_IMAGE" \
   .venv/bin/python -m pytest -m docker_integration -q tests/test_docker_integration.py
 ```
 
 If Docker Desktop's bundled CLI is not on `PATH`, prepend
 `/Applications/Docker.app/Contents/Resources/bin` before the `docker pull`
 command. The fixture tests add that path automatically on macOS. Their host-side
-runner uses pytest; the container fixture uses only Python's standard-library
-`unittest`, so it installs no dependencies.
+runner uses pytest. The original confinement fixture uses standard-library
+`unittest`; the dependency fixture uses the reviewed pytest image built above.
+Neither installs dependencies during verification.
 
-The test manifest pins every locally authored fixture by SHA-256. The tests
+The original confinement fixture manifest pins its source files by SHA-256. The tests
 exercise a deliberately failing arithmetic test and its approved repair, runtime
 isolation (non-root, no network, read-only root, dropped capabilities,
 no-new-privileges, CPU/memory/PID limits), bounded output, timeout, cleanup, and
 snapshot immutability. They do not download packages or run public repositories.
 Fake-adapter unit tests remain separate and do not count as Docker integration
 coverage. Explicitly enabling the suite makes missing Docker/image prerequisites
-a failure, not a skip. The dedicated Linux amd64 CI job requires at least eight
+a failure, not a skip. The dedicated Linux amd64 CI job requires at least ten
 executed tests and zero skips. The suite also checks five repair fixture oracles
 and the HTTP approval/verification/restart flow. It never substitutes fake execution.
 
@@ -220,10 +246,10 @@ repairs. No key means **NOT_RUN**, never fake success. The CLI does not load `.e
 credentials must be in the process environment. See [evaluation policy and
 limits](docs/EVALUATION.md). Live model quality has not yet been measured.
 
-The pinned image contains Python's standard library, not pytest or third-party
-project dependencies. The allowlisted fixture `unittest` command is validated;
-generic pytest verification requires a separately reviewed dependency-image
-strategy. The sandbox never installs packages or enables networking automatically.
+The default image contains Python's standard library. For pytest and controlled
+project dependencies, build the reviewed, hash-locked environment and configure
+its immutable image ID; see [local reliability and dependency setup](docs/RELIABILITY.md).
+The sandbox never installs packages or enables networking automatically.
 
 To inspect the built frontend, run `npm run preview` in `frontend/` and open
 http://127.0.0.1:4173 with the backend still running. Preview includes the local
