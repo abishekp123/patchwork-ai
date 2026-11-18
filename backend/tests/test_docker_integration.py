@@ -303,3 +303,69 @@ def test_live_evaluation_oracles_in_real_docker(tmp_path: Path, fixture):
     )
     assert successful_repair(record, len(fixture.assertions)), record.model_dump()
     assert _tracked_containers() == before
+
+
+def test_real_verification_api_survives_restart(settings: Settings, client_type):
+    """Exercise HTTP approval, real Docker execution, and persisted dashboard state."""
+    from fastapi.testclient import TestClient
+
+    from patchwork.api.repositories import git_client_type
+    from patchwork.main import create_app
+
+    app = create_app(settings)
+    app.dependency_overrides[git_client_type] = lambda: client_type
+    with TestClient(app) as client:
+        imported = client.post(
+            "/api/repositories", json={"url": "https://github.com/example/project"}
+        )
+        assert imported.status_code == 201
+        identifier = imported.json()["repository"]["id"]
+        assert client.get(f"/api/repositories/{identifier}/search?q=updated").json()["results"]
+
+        # A separate controlled standard-library test snapshot; no model calls.
+        repository = index_fixture(settings, FIXTURES[0])
+        patch = PatchStore(settings.database_path).create(
+            repository,
+            PatchProposal(
+                title="API fixture",
+                summary="Known repair, not AI-generated",
+                changes=[
+                    PatchChange(
+                        path="subject.py",
+                        before=FIXTURES[0].source,
+                        after=REPAIRS["arithmetic"],
+                        reason="Known oracle",
+                    )
+                ],
+            ),
+        )
+        endpoint = f"/api/patches/{patch.id}/verifications"
+        assert client.post(endpoint, json={}).status_code == 409
+        approved = client.post(
+            f"/api/patches/{patch.id}/approve",
+            json={
+                "decision": "approve",
+                "reviewer": "fixture-test",
+                "reason": "Explicit fixture approval",
+            },
+        )
+        assert approved.status_code == 200
+        command = "python -m unittest discover -v -p 'fixture_test_*.py'"
+        response = client.post(
+            endpoint, json={"baseline_command": command, "patched_command": command}
+        )
+        assert response.status_code == 201
+        verification_id = response.json()["verification"]["id"]
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            record = client.get(f"/api/verifications/{verification_id}").json()["verification"]
+            if record["status"] in {"COMPLETED", "FAILED", "CANCELLED"}:
+                break
+            time.sleep(0.05)
+        assert record["status"] == "COMPLETED", record
+        assert record["comparison"]["status"] == "IMPROVED"
+    with TestClient(create_app(settings)) as restarted:
+        record = restarted.get(f"/api/verifications/{verification_id}").json()["verification"]
+        assert record["status"] == "COMPLETED"
+        assert record["sandbox_mode"] == "docker"
+        assert restarted.get("/api/dashboard").json()["completed_verifications"] == 1

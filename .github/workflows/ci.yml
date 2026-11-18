@@ -80,6 +80,6 @@ jobs:
           python - <<'PYCODE'
           import xml.etree.ElementTree as ET
           cases = ET.parse("docker-results.xml").getroot().findall(".//testcase")
-          assert len(cases) >= 7, "Real Docker tests were not collected"
+          assert len(cases) >= 8, "Real Docker tests were not collected"
           assert all(not any(case.find(tag) is not None for tag in ("skipped", "failure", "error")) for case in cases), "Docker tests failed or skipped"
           PYCODE

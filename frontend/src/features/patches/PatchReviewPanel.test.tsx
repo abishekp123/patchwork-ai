@@ -285,96 +285,107 @@ describe('PatchReviewPanel', () => {
     expect(screen.getByText(/Fake adapter is test-only/)).toBeInTheDocument()
   })
 
-  it('shows real Docker verification summaries and comparisons', async () => {
-    const patch = {
-      id: 'patch-approved',
-      repository_id: 'a'.repeat(64),
-      commit_sha: 'b'.repeat(40),
-      investigation_id: null,
-      status: 'approved',
-      title: 'Reviewed patch',
-      summary: 'Safe change.',
-      diff: '+safe',
-      evidence_ids: [],
-      created_at: '2026-01-01T00:00:00Z',
-      updated_at: '2026-01-01T00:00:00Z',
-      reviewed_at: '2026-01-01T00:00:00Z',
-      reviewer: 'human',
-      decision_reason: null,
-      error_code: null,
-    }
-    const summary = {
-      exit_code: 0,
-      duration_ms: 20,
-      stdout_truncated: false,
-      stderr_truncated: false,
-      stdout_bytes: 20,
-      stderr_bytes: 0,
-      tests_total: 1,
-      tests_passed: 1,
-      tests_failed: 0,
-      tests_skipped: 0,
-      error_code: null,
-    }
-    const verification = {
-      id: 'verification-1',
-      patch_id: patch.id,
-      repository_id: patch.repository_id,
-      commit_sha: patch.commit_sha,
-      status: 'COMPLETED',
-      sandbox_mode: 'docker',
-      created_at: '2026-01-01T00:00:00Z',
-      updated_at: '2026-01-01T00:00:01Z',
-      started_at: '2026-01-01T00:00:00Z',
-      completed_at: '2026-01-01T00:00:01Z',
-      baseline_summary: summary,
-      patched_summary: summary,
-      comparison: {
-        status: 'IMPROVED',
-        classification: 'improved',
-        reason: 'The patched test passed; baseline failed.',
-        baseline: summary,
-        patched: summary,
-        diff_summary: {},
-        logs: [],
-      },
-      error_code: null,
-      execution_logs: [],
-    }
-    const fetchMock = vi.fn(
-      async (input: string | URL | Request, init?: RequestInit) => {
-        const url = String(input)
-        if (url === '/api/patches')
-          return { ok: true, json: async () => ({ items: [patch] }) }
-        if (url === '/api/verification/sandbox-status')
-          return {
-            ok: true,
-            json: async () => ({ available: true, mode: 'docker' }),
+  it.each(['docker', 'fake'])(
+    'labels %s verification results accurately',
+    async (mode) => {
+      const patch = {
+        id: 'patch-approved',
+        repository_id: 'a'.repeat(64),
+        commit_sha: 'b'.repeat(40),
+        investigation_id: null,
+        status: 'approved',
+        title: 'Reviewed patch',
+        summary: 'Safe change.',
+        diff: '+safe',
+        evidence_ids: [],
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+        reviewed_at: '2026-01-01T00:00:00Z',
+        reviewer: 'human',
+        decision_reason: null,
+        error_code: null,
+      }
+      const summary = {
+        exit_code: 0,
+        duration_ms: 20,
+        stdout_truncated: false,
+        stderr_truncated: false,
+        stdout_bytes: 20,
+        stderr_bytes: 0,
+        tests_total: 1,
+        tests_passed: 1,
+        tests_failed: 0,
+        tests_skipped: 0,
+        error_code: null,
+      }
+      const verification = {
+        id: 'verification-1',
+        patch_id: patch.id,
+        repository_id: patch.repository_id,
+        commit_sha: patch.commit_sha,
+        status: 'COMPLETED',
+        sandbox_mode: mode,
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:01Z',
+        started_at: '2026-01-01T00:00:00Z',
+        completed_at: '2026-01-01T00:00:01Z',
+        baseline_summary: summary,
+        patched_summary: summary,
+        comparison: {
+          status: 'IMPROVED',
+          classification: 'improved',
+          reason: 'The patched test passed; baseline failed.',
+          baseline: summary,
+          patched: summary,
+          diff_summary: {},
+          logs: [],
+        },
+        error_code: null,
+        execution_logs: [],
+      }
+      const fetchMock = vi.fn(
+        async (input: string | URL | Request, init?: RequestInit) => {
+          const url = String(input)
+          if (url === '/api/patches')
+            return { ok: true, json: async () => ({ items: [patch] }) }
+          if (url === '/api/verification/sandbox-status')
+            return {
+              ok: true,
+              json: async () => ({ available: true, mode: 'docker' }),
+            }
+          if (url === `/api/patches/${patch.id}/verifications`) {
+            if (init?.method === 'POST')
+              return { ok: true, json: async () => ({ verification }) }
+            return {
+              ok: true,
+              json: async () => ({ items: [verification] }),
+            }
           }
-        if (url === `/api/patches/${patch.id}/verifications`) {
-          if (init?.method === 'POST')
-            return { ok: true, json: async () => ({ verification }) }
-          return {
-            ok: true,
-            json: async () => ({ items: [verification] }),
-          }
-        }
-        throw new Error(`Unexpected API request: ${url}`)
-      },
-    )
-    vi.stubGlobal('fetch', fetchMock)
+          throw new Error(`Unexpected API request: ${url}`)
+        },
+      )
+      vi.stubGlobal('fetch', fetchMock)
 
-    render(<PatchReviewPanel />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Verify' }))
+      render(<PatchReviewPanel />)
+      fireEvent.click(await screen.findByRole('button', { name: 'Verify' }))
 
-    expect(await screen.findByText('IMPROVED')).toBeInTheDocument()
-    expect(screen.getAllByText('pass (1/1)')).toHaveLength(2)
-    expect(fetchMock).toHaveBeenCalledWith(
-      `/api/patches/${patch.id}/verifications`,
-      expect.objectContaining({
-        method: 'POST',
-        body: expect.stringContaining('"sandbox_mode":"docker"'),
-      }),
-    )
-  })
+      if (mode === 'docker') {
+        expect(await screen.findByText('IMPROVED')).toBeInTheDocument()
+        expect(screen.getAllByText('pass (1/1)')).toHaveLength(2)
+      } else {
+        expect(
+          await screen.findByText('SIMULATED — not Docker verified'),
+        ).toBeInTheDocument()
+        expect(screen.queryByText('IMPROVED')).not.toBeInTheDocument()
+        expect(screen.queryByText('pass (1/1)')).not.toBeInTheDocument()
+      }
+      expect(fetchMock).toHaveBeenCalledWith(
+        `/api/patches/${patch.id}/verifications`,
+        expect.objectContaining({
+          method: 'POST',
+          body: expect.stringContaining('"sandbox_mode":"docker"'),
+        }),
+      )
+    },
+  )
 })

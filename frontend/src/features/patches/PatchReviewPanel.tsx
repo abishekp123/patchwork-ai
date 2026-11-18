@@ -337,67 +337,75 @@ export function PatchReviewPanel({
                         Verification state
                       </span>
                       <span className="text-xs text-violet-700">
-                        {latestVerification.status}
+                        {latestVerification.sandbox_mode === 'docker'
+                          ? latestVerification.status
+                          : 'SIMULATED — not Docker verified'}
                       </span>
                     </div>
-                    {(latestVerification.baseline_summary ||
-                      latestVerification.patched_summary) && (
-                      <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                        <div className="rounded border border-violet-100 bg-white p-2">
-                          <p className="text-[10px] uppercase tracking-[0.18em] text-stone-500">
-                            Baseline
+                    {latestVerification.sandbox_mode === 'docker' &&
+                      (latestVerification.baseline_summary ||
+                        latestVerification.patched_summary) && (
+                        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                          <div className="rounded border border-violet-100 bg-white p-2">
+                            <p className="text-[10px] uppercase tracking-[0.18em] text-stone-500">
+                              Baseline
+                            </p>
+                            <p className="mt-1 text-sm text-stone-700">
+                              {summaryLabel(
+                                latestVerification.baseline_summary,
+                              )}
+                            </p>
+                          </div>
+                          <div className="rounded border border-violet-100 bg-white p-2">
+                            <p className="text-[10px] uppercase tracking-[0.18em] text-stone-500">
+                              Patched
+                            </p>
+                            <p className="mt-1 text-sm text-stone-700">
+                              {summaryLabel(latestVerification.patched_summary)}
+                            </p>
+                          </div>
+                        </div>
+                      )}
+                    {latestResult &&
+                      latestVerification.sandbox_mode === 'docker' && (
+                        <div className="mt-3 rounded border border-violet-100 bg-white p-3">
+                          <p className="text-xs font-medium uppercase tracking-[0.18em] text-violet-700">
+                            Result
+                          </p>
+                          <p className="mt-2 text-sm font-medium text-stone-800">
+                            {latestResult.status}
                           </p>
                           <p className="mt-1 text-sm text-stone-700">
-                            {summaryLabel(latestVerification.baseline_summary)}
+                            {latestResult.reason}
                           </p>
-                        </div>
-                        <div className="rounded border border-violet-100 bg-white p-2">
-                          <p className="text-[10px] uppercase tracking-[0.18em] text-stone-500">
-                            Patched
-                          </p>
-                          <p className="mt-1 text-sm text-stone-700">
-                            {summaryLabel(latestVerification.patched_summary)}
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                    {latestResult && (
-                      <div className="mt-3 rounded border border-violet-100 bg-white p-3">
-                        <p className="text-xs font-medium uppercase tracking-[0.18em] text-violet-700">
-                          Result
-                        </p>
-                        <p className="mt-2 text-sm font-medium text-stone-800">
-                          {latestResult.status}
-                        </p>
-                        <p className="mt-1 text-sm text-stone-700">
-                          {latestResult.reason}
-                        </p>
-                        {latestResult.logs.length > 0 && (
-                          <details className="mt-3 text-left">
-                            <summary className="cursor-pointer text-sm text-stone-700">
-                              View logs
-                            </summary>
-                            <pre className="mt-2 max-h-56 overflow-auto rounded bg-stone-100 p-2 text-xs leading-5 text-stone-700 whitespace-pre-wrap">
-                              {latestResult.logs.join('\n') ||
-                                'No logs were captured.'}
-                            </pre>
-                          </details>
-                        )}
-                        {latestVerification &&
-                          !['COMPLETED', 'FAILED', 'CANCELLED'].includes(
-                            latestVerification.status,
-                          ) && (
-                            <button
-                              type="button"
-                              onClick={() => void cancel(latestVerification.id)}
-                              disabled={inFlightId === latestVerification.id}
-                              className="mt-3 rounded-lg border border-rose-300 bg-white px-3 py-1.5 text-xs font-medium text-rose-800 disabled:opacity-50"
-                            >
-                              Cancel verification
-                            </button>
+                          {latestResult.logs.length > 0 && (
+                            <details className="mt-3 text-left">
+                              <summary className="cursor-pointer text-sm text-stone-700">
+                                View logs
+                              </summary>
+                              <pre className="mt-2 max-h-56 overflow-auto rounded bg-stone-100 p-2 text-xs leading-5 text-stone-700 whitespace-pre-wrap">
+                                {latestResult.logs.join('\n') ||
+                                  'No logs were captured.'}
+                              </pre>
+                            </details>
                           )}
-                      </div>
-                    )}
+                          {latestVerification &&
+                            !['COMPLETED', 'FAILED', 'CANCELLED'].includes(
+                              latestVerification.status,
+                            ) && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  void cancel(latestVerification.id)
+                                }
+                                disabled={inFlightId === latestVerification.id}
+                                className="mt-3 rounded-lg border border-rose-300 bg-white px-3 py-1.5 text-xs font-medium text-rose-800 disabled:opacity-50"
+                              >
+                                Cancel verification
+                              </button>
+                            )}
+                        </div>
+                      )}
                   </div>
                 )}
                 <pre className="mt-4 overflow-x-auto rounded-lg border border-stone-200 bg-white p-3 text-xs leading-6 text-stone-700 whitespace-pre-wrap">

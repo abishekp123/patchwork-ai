@@ -3,6 +3,10 @@ import tailwindcss from '@tailwindcss/vite'
 import { fileURLToPath } from 'node:url'
 import { defineConfig, loadEnv } from 'vite'
 
+export function rewriteApiPath(path: string): string {
+  return path.replace(/^\/api\/health(?=[?#]|$)/, '/health')
+}
+
 const envDir = fileURLToPath(new URL('..', import.meta.url))
 
 export default defineConfig(({ mode }) => {
@@ -10,7 +14,7 @@ export default defineConfig(({ mode }) => {
   const proxy = {
     '/api': {
       target: env.PATCHWORK_API_PROXY_TARGET || 'http://127.0.0.1:8000',
-      rewrite: (path: string) => path.replace(/^\/api/, ''),
+      rewrite: rewriteApiPath,
     },
   }
   return {

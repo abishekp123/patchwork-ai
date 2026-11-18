@@ -85,6 +85,16 @@ def test_verification_api_lifecycle_for_approved_patch(settings: Settings):
     app = create_app(settings)
     app.dependency_overrides[sandbox_from_request] = lambda: FakeSandboxAdapter()
     with TestClient(app) as client:
+        invalid = client.post(
+            f"/api/patches/{approved.id}/verifications",
+            json={"baseline_command": "curl https://example.com"},
+        )
+        assert invalid.status_code == 422
+        unequal = client.post(
+            f"/api/patches/{approved.id}/verifications",
+            json={"baseline_command": "pytest", "patched_command": "python -m pytest -q"},
+        )
+        assert unequal.status_code == 422
         response = client.post(
             f"/api/patches/{approved.id}/verifications",
             json={"sandbox_mode": "docker", "baseline_command": "python -m pytest -q"},

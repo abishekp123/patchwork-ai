@@ -16,7 +16,7 @@ from patchwork.schemas.verifications import (
     VerificationResponse,
     VerificationResultResponse,
 )
-from patchwork.verifications.engine import run_verification
+from patchwork.verifications.engine import _validate_command, run_verification
 from patchwork.verifications.models import SandboxConfig
 from patchwork.verifications.sandbox import SandboxAdapter, SandboxFactory
 from patchwork.verifications.store import VerificationStore
@@ -81,6 +81,10 @@ async def create_verification_for_patch(
         )
 
     payload = body or VerificationRequest()
+    baseline_command = _validate_command(payload.baseline_command or "python -m pytest -q")
+    patched_command = _validate_command(payload.patched_command or "python -m pytest -q")
+    if baseline_command != patched_command:
+        raise PatchworkError("sandbox_policy", "Both snapshots must use the same command.", 422)
     sandbox.validate_policy()
     if not await asyncio.to_thread(sandbox.available):
         raise PatchworkError(
@@ -101,8 +105,8 @@ async def create_verification_for_patch(
             patch.id,
             repository_id=repository.id,
             commit_sha=repository.commit_sha,
-            baseline_command=payload.baseline_command or "python -m pytest -q",
-            patched_command=payload.patched_command or "python -m pytest -q",
+            baseline_command=baseline_command,
+            patched_command=patched_command,
             sandbox_mode=payload.sandbox_mode,
             verification_id=record.id,
             sandbox=sandbox,
