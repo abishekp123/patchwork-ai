@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from patchwork.schemas.repositories import Page
@@ -9,7 +11,7 @@ class VerificationRequest(BaseModel):
 
     baseline_command: str | None = Field(default=None, min_length=1, max_length=200)
     patched_command: str | None = Field(default=None, min_length=1, max_length=200)
-    sandbox_mode: str = Field(default="docker", pattern=r"^(fake|docker)$")
+    sandbox_mode: Literal["docker"] = "docker"
 
 
 class VerificationResponse(BaseModel):

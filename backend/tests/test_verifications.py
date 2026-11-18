@@ -78,7 +78,8 @@ def test_fake_sandbox_returns_test_summary():
 
 
 def test_sandbox_factory_dispatches_modes():
-    assert isinstance(SandboxFactory.create("fake"), FakeSandboxAdapter)
+    with pytest.raises(PatchworkError, match="Unsupported sandbox mode"):
+        SandboxFactory.create("fake")
     assert isinstance(SandboxFactory.create("docker"), SandboxAdapter)
 
 
@@ -196,7 +197,7 @@ def test_verification_engine_runs_for_approved_patch(settings: Settings):
             commit_sha=repository.commit_sha,
             baseline_command="python -m pytest -q",
             patched_command="python -m pytest -q",
-            sandbox_mode="fake",
+            sandbox=FakeSandboxAdapter(),
         )
     )
     assert record.status == "COMPLETED"
@@ -272,3 +273,32 @@ def test_concurrent_verification_creation_allows_only_one_active_run(settings: S
         results = list(workers.map(lambda _: create(), range(2)))
     assert sum(not isinstance(result, str) for result in results) == 1
     assert results.count("verification_in_progress") == 1
+
+
+@pytest.mark.parametrize("error", ["sandbox_timeout", "sandbox_cleanup"])
+def test_infrastructure_failure_is_never_an_improvement(error):
+    from patchwork.verifications.engine import _classify
+    from patchwork.verifications.models import VerificationSummary
+
+    comparison = _classify(
+        VerificationSummary(exit_code=None, error_code=error), VerificationSummary(exit_code=0)
+    )
+    assert comparison.status == "INCONCLUSIVE"
+
+
+@pytest.mark.parametrize("failure", ["daemon", "image", "timeout"])
+def test_docker_readiness_checks_daemon_and_image(monkeypatch, failure):
+    import subprocess
+
+    monkeypatch.setattr("patchwork.verifications.sandbox.shutil.which", lambda _: "/docker")
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append(args)
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired(args, 5)
+        return subprocess.CompletedProcess(args, int(failure == "daemon" or "image" in args))
+
+    monkeypatch.setattr("patchwork.verifications.sandbox.subprocess.run", run)
+    assert not SandboxAdapter().available()
+    assert len(calls) == (2 if failure == "image" else 1)

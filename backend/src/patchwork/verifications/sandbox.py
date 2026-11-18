@@ -45,7 +45,22 @@ class SandboxAdapter:
     def available(self) -> bool:
         if self.config.mode != "docker":
             return False
-        return shutil.which("docker") is not None
+        if shutil.which("docker") is None:
+            return False
+        try:
+            for args in (["info"], ["image", "inspect", self.config.image]):
+                result = subprocess.run(
+                    ["docker", *args],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=5,
+                    check=False,
+                )
+                if result.returncode != 0:
+                    return False
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        return True
 
     def _trusted_workspace(self, workspace: Path) -> Path:
         if not workspace.exists():
@@ -412,8 +427,6 @@ class SandboxFactory:
     def create(mode: str, *, config: SandboxConfig | None = None) -> SandboxAdapter:
         if mode == "docker":
             return SandboxAdapter(config or SandboxConfig(mode="docker"))
-        if mode == "fake":
-            return FakeSandboxAdapter(config or SandboxConfig(mode="fake"))
         raise PatchworkError("sandbox_unavailable", f"Unsupported sandbox mode: {mode}", 422)
 
 

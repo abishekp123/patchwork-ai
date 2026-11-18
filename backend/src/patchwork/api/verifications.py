@@ -1,4 +1,5 @@
 import asyncio
+import tempfile
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Query, Request
@@ -16,7 +17,8 @@ from patchwork.schemas.verifications import (
     VerificationResultResponse,
 )
 from patchwork.verifications.engine import run_verification
-from patchwork.verifications.sandbox import SandboxFactory
+from patchwork.verifications.models import SandboxConfig
+from patchwork.verifications.sandbox import SandboxAdapter, SandboxFactory
 from patchwork.verifications.store import VerificationStore
 
 ERROR_RESPONSES = {
@@ -35,6 +37,20 @@ def settings_from_request(request: Request) -> Settings:
 Config = Annotated[Settings, Depends(settings_from_request)]
 
 
+def sandbox_from_request(settings: Config) -> SandboxAdapter:
+    return SandboxFactory.create(
+        settings.sandbox_mode,
+        config=SandboxConfig(
+            trusted_roots=[tempfile.gettempdir()],
+            timeout_seconds=int(settings.verification_timeout_seconds),
+            output_limit_bytes=settings.verification_output_limit_bytes,
+        ),
+    )
+
+
+Sandbox = Annotated[SandboxAdapter, Depends(sandbox_from_request)]
+
+
 @router.post(
     "/patches/{identifier}/verifications",
     response_model=VerificationResponse,
@@ -44,6 +60,7 @@ async def create_verification_for_patch(
     identifier: Identifier,
     request: Request,
     settings: Config,
+    sandbox: Sandbox,
     body: VerificationRequest | None = None,
 ) -> VerificationResponse:
     patch = PatchStore(settings.database_path).get(identifier)
@@ -64,12 +81,17 @@ async def create_verification_for_patch(
         )
 
     payload = body or VerificationRequest()
+    sandbox.validate_policy()
+    if not sandbox.available():
+        raise PatchworkError(
+            "sandbox_unavailable", "Docker daemon or pinned image unavailable.", 503
+        )
     store = VerificationStore(settings.database_path)
     record = store.create(
         patch_id=patch.id,
         repository_id=repository.id,
         commit_sha=repository.commit_sha,
-        sandbox_mode=payload.sandbox_mode,
+        sandbox_mode=sandbox.config.mode,
     )
 
     tasks = getattr(request.app.state, "verification_tasks", {})
@@ -83,12 +105,15 @@ async def create_verification_for_patch(
             patched_command=payload.patched_command or "python -m pytest -q",
             sandbox_mode=payload.sandbox_mode,
             verification_id=record.id,
+            sandbox=sandbox,
         )
     )
     tasks[record.id] = task
     request.app.state.verification_tasks = tasks
 
     def _cleanup(_finished_task: asyncio.Task[object]) -> None:
+        if not _finished_task.cancelled():
+            _finished_task.exception()  # Failure is persisted; consume the task exception.
         remaining = getattr(request.app.state, "verification_tasks", {})
         remaining.pop(record.id, None)
         request.app.state.verification_tasks = remaining
@@ -154,17 +179,14 @@ async def cancel_verification(
 
 
 @router.get("/verification/sandbox-status", response_model=SandboxStatusResponse)
-def sandbox_status(settings: Config) -> SandboxStatusResponse:
-    mode = settings.sandbox_mode
-    adapter = SandboxFactory.create(mode)
-    if mode == "fake":
-        return SandboxStatusResponse(
-            available=adapter.available(),
-            mode=mode,
-            reason="Fake sandbox for deterministic tests.",
-        )
+def sandbox_status(sandbox: Sandbox) -> SandboxStatusResponse:
     try:
-        adapter.validate_policy()
-        return SandboxStatusResponse(available=adapter.available(), mode=mode)
+        sandbox.validate_policy()
+        available = sandbox.available()
+        return SandboxStatusResponse(
+            available=available,
+            mode=sandbox.config.mode,
+            reason=None if available else "Docker daemon or pinned image unavailable.",
+        )
     except PatchworkError as error:
-        return SandboxStatusResponse(available=False, mode=mode, reason=error.message)
+        return SandboxStatusResponse(available=False, mode="docker", reason=error.message)

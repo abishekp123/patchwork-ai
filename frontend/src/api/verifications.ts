@@ -101,7 +101,7 @@ export async function getSandboxStatus(): Promise<SandboxStatus> {
 export async function createPatchVerification(
   patchId: string,
   payload?: {
-    sandbox_mode?: 'fake' | 'docker'
+    sandbox_mode?: 'docker'
     baseline_command?: string
     patched_command?: string
   },

@@ -2,6 +2,7 @@ import time
 
 from fastapi.testclient import TestClient
 
+from patchwork.api.verifications import sandbox_from_request
 from patchwork.config import Settings
 from patchwork.database import initialize_database
 from patchwork.ingestion.discovery import SourceFile
@@ -11,6 +12,7 @@ from patchwork.patches.engine import PatchChange, PatchProposal
 from patchwork.patches.store import PatchStore
 from patchwork.repositories.store import RepositoryStore
 from patchwork.schemas.verifications import VerificationRequest
+from patchwork.verifications.sandbox import FakeSandboxAdapter
 
 
 def _ready_repository(settings: Settings):
@@ -80,10 +82,12 @@ def test_verification_api_lifecycle_for_approved_patch(settings: Settings):
         reason="Ready for verification.",
     )
 
-    with TestClient(create_app(settings)) as client:
+    app = create_app(settings)
+    app.dependency_overrides[sandbox_from_request] = lambda: FakeSandboxAdapter()
+    with TestClient(app) as client:
         response = client.post(
             f"/api/patches/{approved.id}/verifications",
-            json={"sandbox_mode": "fake", "baseline_command": "python -m pytest -q"},
+            json={"sandbox_mode": "docker", "baseline_command": "python -m pytest -q"},
         )
         assert response.status_code == 201, response.text
         verification_id = response.json()["verification"]["id"]
@@ -128,20 +132,67 @@ def test_verification_api_rejects_unapproved_patch(settings: Settings):
     with TestClient(create_app(settings)) as client:
         response = client.post(
             f"/api/patches/{patch.id}/verifications",
-            json={"sandbox_mode": "fake"},
+            json={"sandbox_mode": "docker"},
         )
         assert response.status_code == 409
         assert response.json()["error"]["code"] == "patch_not_approved"
 
 
-def test_sandbox_status_api_reports_fake_mode(settings: Settings):
+def test_sandbox_status_api_reports_docker_mode(settings: Settings):
     with TestClient(create_app(settings)) as client:
         response = client.get("/api/verification/sandbox-status")
         assert response.status_code == 200, response.text
         payload = response.json()
-        assert payload["mode"] in {"fake", "docker"}
+        assert payload["mode"] == "docker"
         assert "available" in payload
 
 
 def test_verification_request_defaults_to_real_docker_execution():
     assert VerificationRequest().sandbox_mode == "docker"
+
+
+def test_public_api_rejects_fake_and_configuration(settings: Settings):
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        Settings(sandbox_mode="fake")
+    with TestClient(create_app(settings)) as client:
+        response = client.post(
+            "/api/patches/" + "a" * 32 + "/verifications", json={"sandbox_mode": "fake"}
+        )
+        assert response.status_code == 422
+
+
+def test_docker_unavailable_never_falls_back(settings: Settings, monkeypatch):
+    from patchwork.verifications.sandbox import SandboxAdapter
+    from patchwork.verifications.store import VerificationStore
+
+    repository = _ready_repository(settings)
+    proposal = PatchProposal(
+        title="Boundary",
+        summary="Docker is required",
+        changes=[
+            PatchChange(
+                path="example.py",
+                before="def bug():\n    return 1\n",
+                after="def bug():\n    return 2\n",
+                reason="Fixture",
+            )
+        ],
+    )
+    patch = PatchStore(settings.database_path).create(repository, proposal)
+    PatchStore(settings.database_path).transition(
+        patch.id, "approved", reviewer="human", reason="Test fixture"
+    )
+    monkeypatch.setattr(SandboxAdapter, "available", lambda self: False)
+    with TestClient(create_app(settings)) as client:
+        status = client.get("/api/verification/sandbox-status").json()
+        assert status["mode"] == "docker" and not status["available"]
+        response = client.post(f"/api/patches/{patch.id}/verifications", json={})
+        assert response.status_code == 503
+        assert response.json()["error"]["code"] == "sandbox_unavailable"
+    assert (
+        VerificationStore(settings.database_path).list_for_patch(patch.id, limit=20, offset=0)[1]
+        == 0
+    )

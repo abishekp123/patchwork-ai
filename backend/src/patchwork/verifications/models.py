@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class SandboxConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    mode: Literal["fake", "docker"] = "fake"
+    mode: Literal["fake", "docker"] = "docker"
     image: str = "python@sha256:593bd06efe90efa80dc4eee3948be7c0fde4134606dd40d8dd8dbcade98e669c"
     memory_mb: int = Field(default=512, ge=64, le=4096)
     cpus: float = Field(default=1.0, ge=0.25, le=8.0)
