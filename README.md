@@ -232,19 +232,28 @@ and the HTTP approval/verification/restart flow. It never substitutes fake execu
 ### Opt-in real AI repair evaluation
 
 This is separate from the offline evaluation and Docker oracle tests. With
-`OPENAI_API_KEY` exported and Docker/image ready, from `backend/`:
+a key in the ignored root `.env` and Docker/image ready, from `backend/`:
 
 ```sh
 .venv/bin/python -m patchwork.evaluations.live --live --approve-fixtures \
+  --env-file ../.env --max-cost-usd 1 \
+  --cost-ledger /tmp/patchwork-authorized-dollar-ledger.jsonl \
   --output-dir /tmp/patchwork-live-run
 ```
 
 Use a fresh output directory. The approval flag authorizes only the five built-in
 fixtures after deterministic patch/evidence validation. JSON, Markdown, and SQLite
 traces distinguish generated, validated, approved, Docker-tested, and successful
-repairs. No key means **NOT_RUN**, never fake success. The CLI does not load `.env`;
-credentials must be in the process environment. See [evaluation policy and
-limits](docs/EVALUATION.md). Live model quality has not yet been measured.
+repairs. No key means **NOT_RUN**, never fake success. `--env-file` loads only the
+key, without interpolation; exported keys also work. The reviewed model is
+`gpt-6-luna`, with durable reservations before every HTTP attempt and a maximum $1
+budget. Reuse the same cost ledger across attempts under one authorization.
+
+The [actual live attempt](docs/evaluation-results/live-quota-blocked.md) was blocked
+by provider quota: four rejected requests, then a budget-blocked fifth fixture.
+Reported-usage cost was $0; billing is unconfirmed and the conservative upper
+bound is $0.93060. No live repair rate or Docker comparison was measured.
+See [evaluation policy and limits](docs/EVALUATION.md) before retrying.
 
 The default image contains Python's standard library. For pytest and controlled
 project dependencies, build the reviewed, hash-locked environment and configure

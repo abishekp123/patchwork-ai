@@ -28,14 +28,29 @@ class Provider(Protocol):
     async def decide(self, context: str, tools: list[dict], max_output: int) -> Decision: ...
 
 
+class RequestAccounting(Protocol):
+    def reserve(self, model: str, output: int) -> int: ...
+    def observe(self, identifier: int, raw: bytes) -> None: ...
+
+
 class OpenAIProvider:
-    def __init__(self, model: str, timeout: float, transport=None) -> None:
+    def __init__(
+        self,
+        model: str,
+        timeout: float,
+        transport=None,
+        *,
+        accounting: RequestAccounting | None = None,
+    ) -> None:
         self.model, self.timeout, self.transport = model, timeout, transport
+        self.accounting = accounting
 
     async def decide(self, context: str, tools: list[dict], max_output: int) -> Decision:
         key = os.environ.get("OPENAI_API_KEY")
         if not key:
             raise PatchworkError("provider_credentials_missing", "OPENAI_API_KEY is required.", 503)
+        if self.accounting and any(tool.get("type") != "function" for tool in tools):
+            raise PatchworkError("cost_configuration", "Only local function tools are priced.", 422)
         instructions = (
             PATCH_INSTRUCTIONS
             if any(tool.get("name") == "generate_patch" for tool in tools)
@@ -45,6 +60,9 @@ class OpenAIProvider:
             timeout=self.timeout, transport=self.transport, follow_redirects=False, trust_env=False
         ) as client:
             for attempt in range(3):
+                identifier = (
+                    self.accounting.reserve(self.model, max_output) if self.accounting else None
+                )
                 try:
                     async with client.stream(
                         "POST",
@@ -52,6 +70,15 @@ class OpenAIProvider:
                         headers={"Authorization": f"Bearer {key}"},
                         json={
                             "model": self.model,
+                            **(
+                                {
+                                    "service_tier": "default",
+                                    "reasoning": {"effort": "none"},
+                                    "prompt_cache_options": {"mode": "explicit"},
+                                }
+                                if self.accounting
+                                else {}
+                            ),
                             "instructions": instructions,
                             "input": [{"role": "user", "content": context}],
                             "tools": tools,
@@ -70,6 +97,8 @@ class OpenAIProvider:
                                     "Provider response exceeded limit.",
                                     502,
                                 )
+                        if self.accounting is not None and identifier is not None:
+                            self.accounting.observe(identifier, bytes(raw))
                         status = response.status_code
                         if status in (401, 403):
                             raise PatchworkError(

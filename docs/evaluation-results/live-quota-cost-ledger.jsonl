@@ -1,0 +1,5 @@
+{"kind": "policy", "limit": 1000000000, "model": "gpt-6-luna", "version": 1}
+{"fixture": "arithmetic", "id": 0, "kind": "reserve", "max_output": 2000, "reserved_nano": 232650000}
+{"fixture": "off_by_one", "id": 1, "kind": "reserve", "max_output": 2000, "reserved_nano": 232650000}
+{"fixture": "boolean", "id": 2, "kind": "reserve", "max_output": 2000, "reserved_nano": 232650000}
+{"fixture": "dictionary", "id": 3, "kind": "reserve", "max_output": 2000, "reserved_nano": 232650000}

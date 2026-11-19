@@ -1,103 +1,70 @@
 # Session handoff
 
-Date: 2026-11-18 (America/Toronto). Scope: final local validation, job recovery,
-and controlled Python dependency environments. Started from verified `cfe5ff6`;
-existing history and Docker isolation were preserved.
+Date: 2026-11-18 (America/Toronto). Scope: enforce a $1 evaluation budget,
+securely load the root `.env`, and attempt the existing five live fixtures.
+Started from `134a50a`; fixtures, expected outcomes, and Docker isolation unchanged.
 
-## Implemented
+## Current result
 
-- Single API owner per canonical SQLite database path via OS lock (including symlink aliases). Startup atomically fails
-  interrupted investigations/verifications, preserves partial evidence/results,
-  and cleans only database-owned containers and temporary children. Docker must
-  be restored before orphan cleanup can proceed. No automatic paid/execution
-  replay; explicit retry produces a new attempt.
-- Idempotent cancellation and immutable terminal records, duplicate investigation
-  prevention, graceful shutdown handling, and clear UI interruption/retry text.
-  Tests kill real owner processes, verify lock recovery, and remove real orphan
-  containers. SQLite loss during shutdown is logged without masking cleanup.
-- Trusted pytest image built from a digest-pinned Python base and reviewed,
-  hash-locked wheels. Installation happens during an offline image build;
-  runtime networking/install remain disabled. Configured image identities must
-  be immutable and are persisted on verification records (migration 3).
-- Playwright Chromium/WebKit tests use an explicitly enabled test-only server,
-  local Git fixtures, deterministic model responses, real services, and real
-  Docker. Production has no testing routes or model substitution. Fixed file
-  button accessibility semantics and the hidden active-verification cancel button.
-- Actual browser screenshots are in `docs/screenshots`. The simulated model is
-  labeled in the UI and README; these are not live AI performance evidence.
+**Live model evaluation blocked by OpenAI `insufficient_quota`.** Four HTTP requests
+were rejected; a fifth was prevented by the dollar guard. No successful inference,
+evidence report, patch, or live Docker comparison was produced. Repair rate and
+semantic evidence accuracy are N/A, not 0%. The pinned image and Docker were ready.
 
-## Exact verification evidence
+Reported-usage API cost: **$0.00**. Invoice-confirmed expenditure: **unknown**.
+Conservative upper bound: **$0.93060**, within the authorized **$1.00**. No retry
+was made after the blocked suite. The key was never printed or committed.
 
-| Check | Result |
+[Measured per-fixture timings and raw artifacts](evaluation-results/live-quota-blocked.md).
+The original JSON is preserved: its COMPLETED status meant the loop finished.
+A subsequent offline-tested fix now stops account-wide failures immediately,
+sets BLOCKED, and marks remaining fixtures NOT_RUN.
+
+## Implementation
+
+- `evaluations/cost.py`: locked, append-only, fsynced dollar ledger; integer
+  nanodollars; full-context reservations before every HTTP attempt including retries.
+  Valid usage releases unused capacity; ambiguous failures retain full reservations.
+  Journals survive restarts; concurrent owners/corruption/write failures fail closed.
+- Only reviewed `gpt-6-luna`, Standard service, reasoning none, and explicit cache
+  mode without breakpoints. No hosted paid tools. Pricing reviewed from official
+  documentation on this date. The guard is independent of token estimates.
+- `--env-file` loads only OPENAI_API_KEY without interpolation or logging.
+  `--max-cost-usd` is bounded to $1. `--cost-ledger` shares one authorization across
+  fixtures and reruns. Defaults do not permit a more expensive model fallback.
+- Per-fixture reports now include stage outcomes, investigation/proposal when
+  available, source-location validation, latency, and usage/cost accounting.
+  Usage is captured before structured response parsing, including invalid decisions.
+- Existing recovery, trusted dependency environments, and browser workflows remain
+  intact; see [RELIABILITY](RELIABILITY.md).
+
+## Executed checks
+
+| Command | Result |
 | --- | --- |
-| Full backend, Docker enabled | **183 passed, 0 failed, 0 skipped** (33.06s) |
-| Focused Docker + verification tests | **30 passed** (includes 10 real Docker tests) |
-| Fault/recovery + health/API focused run | **27 passed** |
-| Frontend `npm run check` | **31 passed**, Oxlint/Prettier/TypeScript/build passed |
-| Playwright Chromium + WebKit | **8 passed**, four per browser; no retries/skips |
-| Ruff lint and format | Passed; 81 Python files formatted |
-| `pip check` | No broken requirements |
-| Live five-fixture AI evaluation | **NOT_RUN**; no credentials in environment or `.env`; zero provider calls |
-| npm dependency audit | Six high-severity entries from dev-toolchain `picomatch` ReDoS chain; unresolved |
-| CI | All four jobs passed for `90c7a14`: [run 44415888482](https://github.com/abishekp123/patchwork-ai/actions/runs/44415888482) |
+| `pytest backend/tests/test_evaluation_cost.py backend/tests/test_live_evaluation.py backend/tests/test_provider.py -q` | **48 passed** |
+| `PATCHWORK_RUN_DOCKER_INTEGRATION=1 PATCHWORK_TEST_IMAGE=<trusted image ID> pytest backend/tests -q` | **210 passed**, zero failures/skips, 39.47s; includes ten real Docker tests |
+| Frontend `npm run check` | **31 passed**; lint, formatting, TypeScript and production build passed |
+| `ruff check backend scripts` | Passed |
+| `ruff format --check backend scripts` | Passed; 83 Python files |
 
-Backend command from root (Docker CLI must be on PATH):
+Use `backend/.venv/bin/pytest` and `backend/.venv/bin/ruff` from the project root.
+The real Docker regression suite uses the reviewed pytest image, not a live model.
+No browser rerun was needed for these backend-only changes; prior Chromium/WebKit
+coverage remains eight passing tests from the preceding stage, not a new result.
 
-```sh
-PATCHWORK_RUN_DOCKER_INTEGRATION=1 \
-PATCHWORK_TEST_IMAGE="$PATCHWORK_VERIFICATION_IMAGE" \
-  backend/.venv/bin/pytest backend/tests -q
-```
+## Retry requirements
 
-The ordinary CI backend jobs intentionally skip the ten Docker tests. The Docker
-job builds the reviewed image, executes all ten without skips, then runs both
-browser projects sequentially. Do not overlap browser and Docker suites: existing
-container-cleanup assertions observe all labelled test containers.
+Restore OpenAI project billing/quota first. The current authorization ledger is
+`/tmp/patchwork-authorized-dollar-ledger.jsonl`; a sanitized copy is committed with
+the report. It retains four unresolved reservations and **cannot authorize another
+full-capacity request**. Do not delete/reset it to regain budget. Reconcile billing
+and obtain renewed authorization before a new run. Then use the documented CLI
+in [EVALUATION](EVALUATION.md), a fresh results directory, and an appropriately
+reviewed authorization ledger. No automatic paid retry is scheduled.
 
-From `frontend/`, run `npm run check` and `npm run test:browser`. Browser evidence
-covers import, keyboard file navigation, search, investigation states, evidence
-and patch review, explicit approval, real Docker improvement, empty/loading/API
-failure states, refresh persistence, and cancellation before results exist.
-The workflow fixture fails one of two tests before repair and passes both afterward.
-No imported Python executes on the host.
-
-## Live evaluation command
-
-The existing harness calls `OpenAIProvider.decide`, which sends strict function
-calls to `https://api.openai.com/v1/responses` with bounded retries/timeouts and
-usage metadata. Neither model investigations nor patch proposals were measured
-against a real provider this session. Repair rate, failure rate, model latency,
-and inference cost are **N/A**, not zero-percent results.
-
-After securely exporting `OPENAI_API_KEY`, from `backend/`, with Docker/base image
-ready, use a fresh output directory:
-
-```sh
-.venv/bin/python -m patchwork.evaluations.live --live --approve-fixtures \
-  --output-dir /tmp/patchwork-live-20261118-new \
-  --max-calls 40 --max-reserved-tokens 600000 --max-seconds 900
-```
-
-Recorded NOT_RUN reports are in `docs/evaluation-results`. See
-[EVALUATION](EVALUATION.md) for consent and bounds, and
-[RELIABILITY](RELIABILITY.md) for dependency-image setup and recovery semantics.
-
-## Verdict and remaining work
-
-**Ready as a software engineering portfolio demonstration of a local application**:
-real browser/API/Docker integration and process-failure recovery are demonstrated.
-It is not deployment-ready and its AI repair quality remains unmeasured.
-
-- Run the real five-fixture evaluation with credentials before claiming model
-  success rates. Browser tests intentionally use a deterministic provider.
-- Resolve the reported development-toolchain advisory through a reviewed update;
-  npm suggested major downgrades, which were not applied blindly. Development
-  servers remain loopback-bound. No production-security readiness claim is made.
-- One process/local database only; no multi-user authentication, global quotas,
-  distributed execution, or durable resumption. Interrupted jobs require retry.
-- Dependency support is the reviewed image/lock, not arbitrary projects or dynamic
-  installs. Docker shares a kernel; output-based test summaries are not attestation.
-- Recovery covers newly labelled resources. Legacy unowned temporary paths require
-  manual review. Database corruption requires restoring usable storage.
-
-Do not introduce broader deployment infrastructure without a new request.
+Remaining limitations: live AI quality unmeasured; invoice costs unavailable;
+source-location validity is not semantic evidence truth; per-ledger limits cannot
+control other users of the key; rates require review before a future authorization.
+Previous limitations remain: single-process local operation, reviewed dependency
+images only, and six development-toolchain audit entries recorded last stage.

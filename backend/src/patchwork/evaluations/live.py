@@ -7,6 +7,7 @@ import json
 import os
 import tempfile
 import time
+from decimal import Decimal
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -14,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from patchwork.config import Settings
 from patchwork.database import initialize_database
 from patchwork.errors import PatchworkError
+from patchwork.evaluations.cost import MODEL, CostLedger
 from patchwork.evaluations.fixtures import FIXTURES, RepairFixture
 from patchwork.ingestion.discovery import SourceFile
 from patchwork.intelligence.python import parse_python
@@ -38,6 +40,7 @@ class Limits(BaseModel):
     total_reserved_tokens: int = Field(default=600_000, ge=1, le=2_000_000)
     case_seconds: int = Field(default=180, ge=10, le=300)
     total_seconds: int = Field(default=900, ge=10, le=1500)
+    maximum_usd: Decimal = Field(default=Decimal("1"), gt=0, le=1)
     sandbox_seconds: int = Field(default=20, ge=1, le=60)
 
 
@@ -147,9 +150,16 @@ async def evaluate_case(
 ) -> dict:
     """Provider injection is for harness tests; the CLI always constructs OpenAIProvider."""
     started = time.monotonic()
+    ledger = getattr(provider, "accounting", None)
+    attempt_start = len(ledger.attempts) if ledger else 0
+    tokens_before = (budget.input_tokens, budget.output_tokens)
+    if ledger:
+        ledger.fixture = fixture.name
     row = {
         "fixture": fixture.name,
         "outcome": "FAILED",
+        "investigation_success": False,
+        "evidence_locations_valid": False,
         "generated": False,
         "validated": False,
         "approved": False,
@@ -174,6 +184,8 @@ async def evaluate_case(
                     "Investigation did not complete.",
                     422,
                 )
+            row["investigation_success"] = True
+            row["investigation_report"] = completed.report
             refs = completed.report["evidence"]
             cited = sorted(
                 {ref for fact in completed.report["facts"] for ref in fact["evidence_ids"]}
@@ -181,6 +193,7 @@ async def evaluate_case(
             if not refs or not cited:
                 raise PatchworkError("insufficient_evidence", "No observed source evidence.", 422)
             row["evidence"] = refs
+            row["evidence_locations_valid"] = True
             proposal = await PatchGenerator(settings, repository, metered).generate(
                 fixture.description,
                 evidence_ids=cited,
@@ -196,6 +209,7 @@ async def evaluate_case(
                 )
             PatchValidator(settings, repository).validate(proposal)
             row["validated"] = True
+            row["proposal"] = proposal.model_dump(mode="json")
             patches = PatchStore(settings.database_path)
             patch = patches.create(repository, proposal, investigation_id=completed.id)
             row["patch_id"] = patch.id
@@ -239,6 +253,10 @@ async def evaluate_case(
     finally:
         row["duration_seconds"] = round(time.monotonic() - started, 3)
         row["logical_calls"] = metered.calls
+        row["input_tokens"] = budget.input_tokens - tokens_before[0]
+        row["output_tokens"] = budget.output_tokens - tokens_before[1]
+        if ledger:
+            row["cost"] = ledger.summary(attempt_start)
     return row
 
 
@@ -271,6 +289,28 @@ def write_reports(output: Path, result: dict) -> None:
             ],
         ]
         lines.append("| " + " | ".join(values) + " |")
+    if "cost" in result:
+        cost = result["cost"]
+        lines += [
+            "",
+            f"Authorized maximum: ${cost['maximum_usd']:.2f} USD.",
+            f"Reported-usage cost: ${cost['usage_cost_usd']:.8f}; "
+            f"conservative upper bound: ${cost['cost_upper_bound_usd']:.8f}.",
+            f"Usage complete: {cost['usage_complete']}. "
+            "These are rate calculations, not an invoice.",
+            "",
+            "| Fixture | Error | Seconds | Input tokens | Output tokens | Reported cost USD |",
+            "| --- | --- | --- | --- | --- | --- |",
+        ]
+        for row in result["cases"]:
+            usage = row.get("cost", {})
+            lines.append(
+                f"| {row['fixture']} | {row.get('error_code')} | "
+                f"{row.get('duration_seconds', 'N/A')} | "
+                f"{usage.get('input_tokens', 'N/A')} | "
+                f"{usage.get('output_tokens', 'N/A')} | "
+                f"{usage.get('usage_cost_usd', 'N/A')} |"
+            )
     lines += [
         "",
         "A successful repair means the fixed fixture tests passed in Docker; it is not",
@@ -280,7 +320,15 @@ def write_reports(output: Path, result: dict) -> None:
     (output / "results.md").write_text("\n".join(lines))
 
 
-async def run_suite(output: Path, *, live: bool, approve: bool, limits: Limits, model: str) -> dict:
+async def run_suite(
+    output: Path,
+    *,
+    live: bool,
+    approve: bool,
+    limits: Limits,
+    model: str,
+    cost_ledger: Path | None = None,
+) -> dict:
     result = {
         "suite": "real-ai-repair-v1",
         "created_at": timestamp(),
@@ -288,7 +336,7 @@ async def run_suite(output: Path, *, live: bool, approve: bool, limits: Limits, 
         "provider": "OpenAI Responses API",
         "status": "NOT_RUN",
         "cases": [],
-        "limits": limits.model_dump(),
+        "limits": limits.model_dump(mode="json"),
         "approval_policy": APPROVAL,
         "reason": None,
     }
@@ -301,12 +349,17 @@ async def run_suite(output: Path, *, live: bool, approve: bool, limits: Limits, 
         )
     elif not approve:
         result["reason"] = "Explicit --approve-fixtures consent required for this evaluation suite."
+    elif model != MODEL:
+        result["reason"] = "Model has no reviewed USD budget policy."
     elif not SandboxAdapter(SandboxConfig(trusted_roots=[tempfile.gettempdir()])).available():
         result["reason"] = "Docker daemon or pinned image unavailable."
     else:
         output.mkdir(parents=True, exist_ok=True)
         # Keep traces but never mix successive evaluations or production data.
-        with tempfile.TemporaryDirectory(prefix="patchwork-live-snapshots-") as snapshots:
+        with (
+            CostLedger(cost_ledger or output / "cost-ledger.jsonl", limits.maximum_usd) as ledger,
+            tempfile.TemporaryDirectory(prefix="patchwork-live-snapshots-") as snapshots,
+        ):
             settings = Settings(
                 database_path=output / "evaluation.db",
                 repository_dir=Path(snapshots),
@@ -320,14 +373,38 @@ async def run_suite(output: Path, *, live: bool, approve: bool, limits: Limits, 
             if settings.database_path.exists():
                 raise ValueError("Choose a fresh output directory; evaluation.db already exists.")
             initialize_database(settings.database_path)
-            provider = OpenAIProvider(model, settings.provider_timeout_seconds)
+            provider = OpenAIProvider(model, settings.provider_timeout_seconds, accounting=ledger)
+            blocked = None
             for fixture in FIXTURES:
+                if blocked:
+                    result["cases"].append(
+                        {
+                            "fixture": fixture.name,
+                            "outcome": "NOT_RUN",
+                            "error_code": blocked,
+                            "generated": False,
+                            "validated": False,
+                            "approved": False,
+                            "docker_tested": False,
+                            "successful_repair": False,
+                        }
+                    )
+                    continue
                 row = await evaluate_case(settings, fixture, provider, budget, approve=approve)
                 result["cases"].append(row)
+                if row["error_code"] in {
+                    "provider_quota",
+                    "provider_authentication",
+                    "evaluation_cost_budget",
+                    "evaluation_failed",
+                }:
+                    blocked = row["error_code"]
                 result["status"] = "RUNNING"
                 result["usage"] = budget.summary()
+                result["cost"] = ledger.summary()
                 write_reports(output, result)  # Checkpoint after every case.
-            result["status"] = "COMPLETED"
+            result["status"] = "BLOCKED" if blocked else "COMPLETED"
+            result["reason"] = blocked
     if result["status"] == "NOT_RUN":
         result["cases"] = [
             {
@@ -353,12 +430,28 @@ def main() -> int:
     parser.add_argument("--live", action="store_true")
     parser.add_argument("--approve-fixtures", action="store_true")
     parser.add_argument("--output-dir", type=Path, required=True)
-    parser.add_argument("--model", default="gpt-4.1-mini")
+    parser.add_argument("--model", default=MODEL)
+    parser.add_argument("--max-cost-usd", type=Decimal, default=Decimal("1"))
+    parser.add_argument("--cost-ledger", type=Path)
+    parser.add_argument(
+        "--env-file", type=Path, help="Load only OPENAI_API_KEY, without interpolation"
+    )
     parser.add_argument("--max-calls", type=int, default=40)
     parser.add_argument("--max-reserved-tokens", type=int, default=600_000)
     parser.add_argument("--max-seconds", type=int, default=900)
     args = parser.parse_args()
+    if args.env_file:
+        import logging
+
+        from dotenv import dotenv_values
+
+        logging.getLogger("dotenv.main").disabled = True
+        key = dotenv_values(args.env_file, interpolate=False).get("OPENAI_API_KEY")
+        if not key:
+            parser.error("The specified environment file has no OPENAI_API_KEY.")
+        os.environ["OPENAI_API_KEY"] = key
     limits = Limits(
+        maximum_usd=args.max_cost_usd,
         total_calls=args.max_calls,
         total_reserved_tokens=args.max_reserved_tokens,
         total_seconds=args.max_seconds,
@@ -370,6 +463,7 @@ def main() -> int:
             approve=args.approve_fixtures,
             limits=limits,
             model=args.model,
+            cost_ledger=args.cost_ledger,
         )
     )
     print(json.dumps({name: result[name] for name in ("status", "successful_repairs", "reason")}))

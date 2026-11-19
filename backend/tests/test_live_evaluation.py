@@ -209,3 +209,47 @@ def test_success_requires_docker_real_tests_and_baseline_failure():
         ),
         3,
     )
+
+
+@pytest.mark.parametrize(
+    "code", ["provider_quota", "provider_authentication", "evaluation_cost_budget"]
+)
+def test_account_failure_stops_remaining_fixtures(tmp_path, monkeypatch, code):
+    from patchwork.evaluations.cost import MODEL
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-only")
+    monkeypatch.setattr("patchwork.evaluations.live.SandboxAdapter.available", lambda self: True)
+    calls = []
+
+    async def failed(self, *args):
+        calls.append(1)
+        raise PatchworkError(code, "Safe failure", 502)
+
+    monkeypatch.setattr("patchwork.evaluations.live.OpenAIProvider.decide", failed)
+    result = asyncio.run(run_suite(tmp_path, live=True, approve=True, limits=Limits(), model=MODEL))
+    assert result["status"] == "BLOCKED" and result["reason"] == code
+    assert len(calls) == 1
+    assert all(row["outcome"] == "NOT_RUN" for row in result["cases"][1:])
+    assert "Authorized maximum: $1.00" in (tmp_path / "results.md").read_text()
+
+
+def test_cli_loads_only_key_without_interpolation(tmp_path, monkeypatch):
+    import os
+
+    from patchwork.evaluations.live import main
+
+    env_file = tmp_path / ".env"
+    env_file.write_text('OPENAI_API_KEY="test-${DONT_EXPAND}"\nUNRELATED=do-not-load\n')
+    monkeypatch.delenv("UNRELATED", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "old-test-value")
+    monkeypatch.setattr(
+        "sys.argv", ["live", "--env-file", str(env_file), "--output-dir", str(tmp_path)]
+    )
+
+    async def fake(*args, **kwargs):
+        assert os.environ["OPENAI_API_KEY"] == "test-${DONT_EXPAND}"
+        assert "UNRELATED" not in os.environ
+        return {"status": "NOT_RUN", "successful_repairs": 0, "reason": "test"}
+
+    monkeypatch.setattr("patchwork.evaluations.live.run_suite", fake)
+    assert main() == 1
